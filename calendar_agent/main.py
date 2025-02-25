@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from loguru import logger
 
-from .agent import calendar_agent, CalendarDependencies
+from .agent import calendar_agent, CalendarDependencies, CalendarResponse, ResponseType
 from .calendar_tool import CalendarTool
 
 
@@ -33,28 +33,29 @@ async def main():
             result = await calendar_agent.run(user_input, deps=deps)
             
             # Display response
-            print("\nAssistant:", result.data.message)
+            print("\nA:", result.data.message)
             
-            # Show suggested slots if any
-            if result.data.suggested_slots:
-                print("\nSuggested time slots:")
-                for slot in result.data.suggested_slots:
-                    print(f"- {slot.start_time.strftime('%I:%M %p')} to {slot.end_time.strftime('%I:%M %p')}")
-            
-            # Show action taken if any
-            if result.data.action_taken:
-                print("\nAction taken:", result.data.action_taken)
-                logger.info(f"Action taken: {result.data.action_taken}")
+            # Only process calendar-specific fields for CalendarResponse
+            if result.data.type == ResponseType.CALENDAR:
+                # Show suggested slots if any
+                if result.data.suggested_slots:
+                    print("\nSuggested time slots:")
+                    for slot in result.data.suggested_slots:
+                        print(f"- {slot.start_time.strftime('%I:%M %p')} to {slot.end_time.strftime('%I:%M %p')}")
+                
+                # Show action taken if any
+                if result.data.action_taken:
+                    print("\nAction taken:", result.data.action_taken)
+                    logger.info(f"Action taken: {result.data.action_taken}")
             
             print()  # Empty line for readability
             
         except KeyboardInterrupt:
-            logger.info("User interrupted the program")
+            logger.info("Keyboard interrupt received")
             break
         except Exception as e:
-            logger.exception("Error processing request")
-            print(f"Error: {e}")
-            continue
+            logger.error(f"Error processing request\n{e}")
+            print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -129,8 +129,9 @@ celerybeat.pid
 
 # Environment variables
 .env
-.env.*
-!.env.*.example
+.env.secrets
+!.env.example
+!.env.secrets.example
 
 # Logs
 logs/
