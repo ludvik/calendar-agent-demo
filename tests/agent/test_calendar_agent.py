@@ -9,6 +9,7 @@ from calendar_agent.calendar_service import CalendarService
 from calendar_agent.calendar_tool import CalendarTool
 from calendar_agent.config import DatabaseConfig
 from calendar_agent.models import Appointment, AppointmentStatus, Base, Calendar
+from calendar_agent.response import TimeSlot
 
 
 @pytest.fixture
@@ -149,14 +150,14 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
     # Verify each suggested slot is actually available in the database
     if response.data.suggested_slots:
         with calendar_service.session_factory() as session:
-            for start, end in response.data.suggested_slots:
+            for timeslot in response.data.suggested_slots:
                 conflicts = (
                     session.query(Appointment)
                     .filter(
                         Appointment.calendar_id == test_calendar.id,
                         Appointment.status == AppointmentStatus.CONFIRMED,
-                        Appointment.start_time < end,
-                        Appointment.end_time > start,
+                        Appointment.start_time < timeslot.end_time,
+                        Appointment.end_time > timeslot.start_time,
                     )
                     .all()
                 )
