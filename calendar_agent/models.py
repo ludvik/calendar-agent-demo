@@ -16,6 +16,7 @@ def utc_now() -> datetime:
 
 class Base(DeclarativeBase):
     """Base class for all models."""
+
     pass
 
 

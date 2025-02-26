@@ -62,7 +62,7 @@ class CalendarService:
         priority: int = 5,
     ) -> Tuple[bool, Appointment]:
         """Schedule a new appointment.
-        
+
         Args:
             calendar_id: ID of the calendar
             title: Title of the appointment
@@ -70,7 +70,7 @@ class CalendarService:
             end_time: End time
             status: Status of the appointment
             priority: Priority of the appointment (1-5, lower is higher priority)
-            
+
         Returns:
             Tuple of (success, appointment)
         """
@@ -159,7 +159,7 @@ class CalendarService:
         priority: int = 5,
     ) -> List[Tuple[datetime, datetime]]:
         """Find available time slots between start_time and end_time.
-        
+
         Args:
             calendar_id: ID of the calendar
             start_time: Start time to search from
@@ -167,7 +167,7 @@ class CalendarService:
             duration: Duration of each slot in minutes
             max_slots: Maximum number of slots to return
             priority: Priority level to consider
-            
+
         Returns:
             List of (start_time, end_time) tuples
         """
@@ -180,7 +180,9 @@ class CalendarService:
 
         while current_time + timedelta(minutes=duration) <= end_time:
             slot_end = current_time + timedelta(minutes=duration)
-            if self.is_time_slot_available(calendar_id, current_time, slot_end, priority):
+            if self.is_time_slot_available(
+                calendar_id, current_time, slot_end, priority
+            ):
                 available_slots.append((current_time, slot_end))
                 if len(available_slots) >= max_slots:
                     break
@@ -241,13 +243,13 @@ class CalendarService:
         priority: int = 5,
     ) -> bool:
         """Check if a time slot is available.
-        
+
         Args:
             calendar_id: ID of the calendar
             start_time: Start time
             end_time: End time
             priority: Priority of the appointment (1-5, lower is higher priority)
-            
+
         Returns:
             bool: True if the slot is available, False otherwise
         """

@@ -1,4 +1,5 @@
 """Response types for calendar agent."""
+
 from enum import Enum
 from typing import List, Optional
 

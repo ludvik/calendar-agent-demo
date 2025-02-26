@@ -55,7 +55,9 @@ def test_schedule_appointment_integration(calendar_service, test_calendar):
     history = [Message(role="user", content=prompt)]
 
     # Process through agent
-    response = run_with_calendar_sync(prompt, history, calendar_service, test_calendar.id)
+    response = run_with_calendar_sync(
+        prompt, history, calendar_service, test_calendar.id
+    )
 
     # Verify tool response structure
     assert response.data.type == "CALENDAR"
@@ -77,7 +79,7 @@ def test_schedule_appointment_integration(calendar_service, test_calendar):
         assert apt.calendar_id == test_calendar.id
         assert apt.title == "Meeting with John"
         assert apt.start_time.hour == 14  # 2 PM
-        assert apt.end_time.hour == 15    # 3 PM
+        assert apt.end_time.hour == 15  # 3 PM
         assert apt.status == AppointmentStatus.CONFIRMED
         assert isinstance(apt.created_at, datetime)
 
@@ -102,13 +104,15 @@ def test_check_availability_integration(calendar_service, test_calendar):
     history = [Message(role="user", content=prompt)]
 
     # Process through agent
-    response = run_with_calendar_sync(prompt, history, calendar_service, test_calendar.id)
+    response = run_with_calendar_sync(
+        prompt, history, calendar_service, test_calendar.id
+    )
 
     # Verify tool response structure
     assert response.data.type == "CALENDAR"
     assert response.data.action_taken.startswith("Checked availability")
     assert response.data.suggested_slots is None
-    
+
     # Verify the time is actually not available in the database
     with calendar_service.session_factory() as session:
         conflicts = (
@@ -133,13 +137,15 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
     history = [Message(role="user", content=prompt)]
 
     # Process through agent
-    response = run_with_calendar_sync(prompt, history, calendar_service, test_calendar.id)
+    response = run_with_calendar_sync(
+        prompt, history, calendar_service, test_calendar.id
+    )
 
     # Verify tool response structure
     assert response.data.type == "CALENDAR"
     assert response.data.action_taken.startswith("Found available slots")
     assert isinstance(response.data.suggested_slots, list)
-    
+
     # Verify each suggested slot is actually available in the database
     if response.data.suggested_slots:
         with calendar_service.session_factory() as session:
