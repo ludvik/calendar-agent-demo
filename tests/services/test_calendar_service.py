@@ -2,14 +2,14 @@
 
 import os
 from datetime import datetime, timedelta, timezone
-
+from calendar_agent.models import Calendar, Appointment, AppointmentStatus
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from calendar_agent.calendar_service import CalendarService
 from calendar_agent.config import DatabaseConfig
-from calendar_agent.models import AppointmentStatus, Base
+from calendar_agent.models import Base
 
 
 def utc_datetime(*args, **kwargs) -> datetime:
@@ -232,3 +232,82 @@ def test_is_day_underutilized(service, calendar, tomorrow_9am):
     is_under, hours = service.is_day_underutilized(calendar.id, tomorrow_9am)
     assert not is_under
     assert hours == 4.0
+
+
+def test_cancel_appointment(service, calendar):
+    """Test cancelling an appointment."""
+    # First schedule an appointment
+    start_time = datetime(2025, 2, 26, 14, 0, tzinfo=timezone.utc)  # 2 PM
+    end_time = start_time + timedelta(hours=1)
+    success, appointment = service.schedule_appointment(
+        calendar_id=calendar.id,
+        title="Test Appointment",
+        start_time=start_time,
+        end_time=end_time,
+        status=AppointmentStatus.CONFIRMED,
+    )
+    assert success
+    assert appointment is not None
+
+    # Cancel the appointment
+    success = service.cancel_appointment(appointment.id)
+    assert success
+
+    # Verify the appointment is cancelled
+    with service.session_factory() as session:
+        cancelled_apt = session.query(Appointment).filter(
+            Appointment.id == appointment.id
+        ).first()
+        assert cancelled_apt.status == AppointmentStatus.CANCELLED
+
+
+def test_get_appointments_in_range(service, calendar):
+    """Test getting appointments in a time range."""
+    # Schedule some appointments
+    base_time = datetime(2025, 2, 26, 14, 0, tzinfo=timezone.utc)  # 2 PM
+    appointments = []
+    
+    # Create 3 one-hour appointments starting at 2 PM, 3 PM, and 4 PM
+    for i in range(3):
+        start_time = base_time + timedelta(hours=i)
+        end_time = start_time + timedelta(hours=1)
+        success, apt = service.schedule_appointment(
+            calendar_id=calendar.id,
+            title=f"Appointment {i+1}",
+            start_time=start_time,
+            end_time=end_time,
+            status=AppointmentStatus.CONFIRMED,
+        )
+        assert success
+        appointments.append(apt)
+
+    # Test getting appointments in various ranges
+    # 1. Get all appointments (2 PM to 5 PM)
+    success, all_apts = service.get_appointments_in_range(
+        calendar_id=calendar.id,
+        start_time=base_time,
+        end_time=base_time + timedelta(hours=3),
+    )
+    assert success
+    assert len(all_apts) == 3
+    assert all(a.title in [f"Appointment {i+1}" for i in range(3)] for a in all_apts)
+
+    # 2. Get appointments in middle (2:30 PM to 3:30 PM)
+    success, middle_apts = service.get_appointments_in_range(
+        calendar_id=calendar.id,
+        start_time=base_time + timedelta(minutes=30),
+        end_time=base_time + timedelta(minutes=90),
+    )
+    assert success
+    assert len(middle_apts) == 2  # Should include first and second appointments
+    assert middle_apts[0].title == "Appointment 1"
+    assert middle_apts[1].title == "Appointment 2"
+
+    # 3. Get appointments with no overlap
+    success, no_apts = service.get_appointments_in_range(
+        calendar_id=calendar.id,
+        start_time=base_time + timedelta(hours=5),  # 7 PM
+        end_time=base_time + timedelta(hours=6),    # 8 PM
+    )
+    assert success
+    assert len(no_apts) == 0

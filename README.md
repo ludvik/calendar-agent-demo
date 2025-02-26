@@ -84,7 +84,6 @@ The system will indicate whether it's using the real GPT-4 model or running in t
 
 
 ## Technology Choices
-
 ### AI & Agent Framework
 - **pydantic-ai**: Core framework for building AI agents
   - Agent definition and tool integration

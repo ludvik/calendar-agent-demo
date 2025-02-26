@@ -3,6 +3,7 @@
 from datetime import datetime, time, timedelta, timezone
 from typing import List, Optional, Tuple
 
+from loguru import logger
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -320,3 +321,62 @@ class CalendarService:
             )
             .all()
         )
+
+    def cancel_appointment(self, appointment_id: int) -> bool:
+        """Cancel an appointment by setting its status to CANCELLED.
+
+        Args:
+            appointment_id: ID of the appointment to cancel
+
+        Returns:
+            bool: True if successfully cancelled, False otherwise
+        """
+        try:
+            with self.session_factory() as session:
+                appointment = (
+                    session.query(Appointment)
+                    .filter(Appointment.id == appointment_id)
+                    .first()
+                )
+
+                if not appointment:
+                    return False
+
+                appointment.status = AppointmentStatus.CANCELLED
+                session.commit()
+                return True
+        except SQLAlchemyError:
+            return False
+
+    def get_appointments_in_range(
+        self,
+        calendar_id: int,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Tuple[bool, List[Appointment]]:
+        """Get all appointments within a time range.
+
+        Args:
+            calendar_id: ID of the calendar
+            start_time: Start of the range
+            end_time: End of the range
+
+        Returns:
+            Tuple of (success, appointments)
+        """
+        try:
+            with self.session_factory() as session:
+                appointments = (
+                    session.query(Appointment)
+                    .filter(
+                        Appointment.calendar_id == calendar_id,
+                        Appointment.status == AppointmentStatus.CONFIRMED,
+                        Appointment.start_time < end_time,
+                        Appointment.end_time > start_time,
+                    )
+                    .order_by(Appointment.start_time)
+                    .all()
+                )
+                return True, appointments
+        except SQLAlchemyError:
+            return False, []
