@@ -1,10 +1,16 @@
 import os
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
 import logfire
 from dotenv import load_dotenv
 from loguru import logger
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker
+
+from .models import Base
 
 # Setup base path
 BASE_DIR = Path(__file__).parent.parent
@@ -42,6 +48,50 @@ logger.add(
 )
 
 
+class DatabaseConfig:
+    """Database configuration and initialization."""
+
+    def __init__(self, db_url: Optional[str] = None):
+        """Initialize database configuration.
+
+        Args:
+            db_url: Database URL. If None, uses environment variable or default SQLite.
+        """
+        self.db_url = db_url or os.getenv("DATABASE_URL", "sqlite:///calendar.db")
+        self._engine = None
+        self._session_factory = None
+
+    @property
+    def engine(self) -> Engine:
+        """Get or create SQLAlchemy engine."""
+        if self._engine is None:
+            connect_args = {}
+            if self.db_url.startswith("sqlite"):
+                # Enable SQLite to store timezone-aware datetimes
+                connect_args["detect_types"] = (
+                    sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+                )
+
+            self._engine = create_engine(
+                self.db_url,
+                connect_args=connect_args,
+            )
+            # Create tables if they don't exist
+            Base.metadata.create_all(self._engine)
+        return self._engine
+
+    @property
+    def session_factory(self) -> sessionmaker:
+        """Get or create SQLAlchemy session factory."""
+        if self._session_factory is None:
+            self._session_factory = sessionmaker(bind=self.engine)
+        return self._session_factory
+
+    def init_db(self) -> Engine:
+        """Initialize the database and return the engine."""
+        return self.engine
+
+
 class Config:
     """Global configuration singleton"""
 
@@ -55,11 +105,20 @@ class Config:
 
     def _init(self):
         """Initialize configuration"""
+        # Disable Logfire console output via environment variable
+        os.environ["LOGFIRE_CONSOLE_LOG"] = "false"
+
         # Configure logfire
-        logfire.configure(service_name="calendar_agent")
+        logfire.configure(
+            service_name="calendar_agent",
+        )
         # Enable HTTP request tracking
         logfire.instrument_httpx(capture_all=True)
         logger.debug("Logfire configured")
+
+        # Database configuration
+        self.db = DatabaseConfig()
+        logger.debug(f"Database configured with URL: {self.db.db_url}")
 
         # Sensitive configurations
         self.openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
@@ -94,15 +153,8 @@ class Config:
                 diagnose=True,
             )
 
-        logger.debug("Configuration loaded")
-        logger.debug(f"Calendar sync interval: {self.calendar_sync_interval}s")
-        logger.debug(f"Default meeting duration: {self.default_meeting_duration}min")
-        logger.debug(f"Max suggestions: {self.max_suggestions}")
-
-    @property
-    def is_using_real_llm(self) -> bool:
-        """Check if we're using a real LLM or test mode"""
-        return bool(self.openai_api_key)
+        # Flag to indicate if we're using a real LLM
+        self.is_using_real_llm = bool(self.openai_api_key)
 
 
 # Create global config instance
