@@ -1,7 +1,7 @@
 """Response types for calendar agent."""
 
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel
 
@@ -32,5 +32,8 @@ class CalendarResponse(BaseResponse):
     """Calendar-specific response from agent."""
 
     type: ResponseType = ResponseType.CALENDAR
-    action_taken: str
+    action_taken: Optional[str] = None
     suggested_slots: Optional[List[TimeSlot]] = None
+    conflicts: Optional[List[Dict[str, Any]]] = None
+    resolved: Optional[List[Dict[str, Any]]] = None
+    unresolved: Optional[List[Dict[str, Any]]] = None

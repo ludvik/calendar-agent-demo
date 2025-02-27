@@ -67,10 +67,12 @@ class DatabaseConfig:
         if self._engine is None:
             connect_args = {}
             if self.db_url.startswith("sqlite"):
-                # Enable SQLite to store timezone-aware datetimes
+                # Enable SQLite to handle datetime types better
                 connect_args["detect_types"] = (
                     sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
                 )
+                # Note: SQLite still doesn't fully support timezone-aware datetimes
+                # We'll handle timezone conversion in the service layer
 
             self._engine = create_engine(
                 self.db_url,

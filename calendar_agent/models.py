@@ -77,6 +77,8 @@ class Appointment(Base):
     priority: Mapped[int] = mapped_column(
         Integer, nullable=False, default=5
     )  # 1 (highest) to 9 (lowest)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    location: Mapped[str] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
