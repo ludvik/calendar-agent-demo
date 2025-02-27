@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from agent import calendar_agent, CalendarDependencies
+from agent import CalendarDependencies, calendar_agent
 from calendar_tool import CalendarTool
 
 

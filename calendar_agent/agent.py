@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Union, Any
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import logfire
 from loguru import logger
@@ -349,7 +349,7 @@ async def resolve_conflicts(
 ) -> CalendarResponse:
     """
     Resolve conflicts for a previously scheduled appointment
-    
+
     Args:
         for_appointment_id: ID of the appointment to resolve conflicts for
         use_priority_based: Whether to use priority-based resolution (default: True)
@@ -361,28 +361,28 @@ async def resolve_conflicts(
             }
         reschedule_window_days: Number of days to look ahead for rescheduling (default: 2)
         preferred_hours: List of preferred hours (9-17) to try first (default: [9, 10, 11, 14, 15, 16])
-    
+
     Returns:
         CalendarResponse with resolution result
     """
     # Create a simplified strategies structure that's easier for the LLM to work with
     if preferred_hours is None:
         preferred_hours = [9, 10, 11, 14, 15, 16]
-    
+
     # Map the simple parameters to the more complex structure expected by the service
     strategies = {
         "by_priority": use_priority_based,
         "fallback": {
             "action": "reschedule",
             "window_days": reschedule_window_days,
-            "preferred_hours": preferred_hours
-        }
+            "preferred_hours": preferred_hours,
+        },
     }
-    
+
     # Add type-based strategies if provided
     if type_based_strategies:
         strategies["by_type"] = type_based_strategies
-    
+
     # Try to resolve conflicts
     resolved, unresolved = ctx.deps.calendar.resolve_conflicts(
         for_appointment_id=for_appointment_id,

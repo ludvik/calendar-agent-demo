@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -107,7 +107,7 @@ class CalendarTool:
     ) -> Tuple[bool, Optional[Dict], List[Dict]]:
         """
         Schedule a new appointment.
-        
+
         Args:
             title: Title of the appointment
             start_time: Start time
@@ -116,22 +116,24 @@ class CalendarTool:
             priority: Priority of the appointment (1-5, lower is higher priority)
             description: Optional description
             location: Optional location
-            
+
         Returns:
             Tuple of (success, appointment_dict, conflicting_appointments)
         """
         try:
-            success, appointment, conflicts = self.calendar_service.schedule_appointment(
-                calendar_id=self.active_calendar_id,
-                title=title,
-                start_time=start_time,
-                end_time=end_time,
-                status=status,
-                priority=priority,
-                description=description,
-                location=location,
+            success, appointment, conflicts = (
+                self.calendar_service.schedule_appointment(
+                    calendar_id=self.active_calendar_id,
+                    title=title,
+                    start_time=start_time,
+                    end_time=end_time,
+                    status=status,
+                    priority=priority,
+                    description=description,
+                    location=location,
+                )
             )
-            
+
             if success and appointment:
                 # Convert to dict for the agent
                 appointment_dict = {
@@ -142,19 +144,21 @@ class CalendarTool:
                     "status": appointment.status.value,
                     "priority": appointment.priority,
                 }
-                
+
                 # Convert conflicting appointments to dict
                 conflicts_dict = []
                 for appt in conflicts:
-                    conflicts_dict.append({
-                        "id": appt.id,
-                        "title": appt.title,
-                        "start_time": appt.start_time.isoformat(),
-                        "end_time": appt.end_time.isoformat(),
-                        "status": appt.status.value,
-                        "priority": appt.priority,
-                    })
-                
+                    conflicts_dict.append(
+                        {
+                            "id": appt.id,
+                            "title": appt.title,
+                            "start_time": appt.start_time.isoformat(),
+                            "end_time": appt.end_time.isoformat(),
+                            "status": appt.status.value,
+                            "priority": appt.priority,
+                        }
+                    )
+
                 return success, appointment_dict, conflicts_dict
             return success, None, []
         except Exception as e:
@@ -162,13 +166,11 @@ class CalendarTool:
             return False, None, []
 
     def resolve_conflicts(
-        self,
-        for_appointment_id: int,
-        strategies: Dict
+        self, for_appointment_id: int, strategies: Dict
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Resolve conflicts for a previously scheduled appointment.
-        
+
         Args:
             for_appointment_id: ID of the appointment to resolve conflicts for
             strategies: Dictionary of conflict resolution strategies
@@ -176,13 +178,13 @@ class CalendarTool:
                 {
                     "by_type": {
                         "internal": {
-                            "action": "reschedule", 
+                            "action": "reschedule",
                             "target_window": "2025-03-02T09:00-12:00",
                             "preferred_hours": [9, 10, 14, 15],
                             "avoid_lunch_hour": true
                         },
                         "client_meeting": {
-                            "action": "reschedule", 
+                            "action": "reschedule",
                             "target_window": "2025-03-01T17:00-19:00"
                         }
                     },
@@ -193,16 +195,15 @@ class CalendarTool:
                         "preferred_hours": [9, 10, 11, 14, 15, 16]
                     }
                 }
-                
+
         Returns:
             Tuple of (resolved_appointments, unresolved_appointments)
         """
         try:
             resolved, unresolved = self.calendar_service.resolve_conflicts(
-                for_appointment_id=for_appointment_id,
-                strategies=strategies
+                for_appointment_id=for_appointment_id, strategies=strategies
             )
-            
+
             # Convert resolved appointments to dict
             resolved_dict = []
             for appt in resolved:
@@ -210,32 +211,36 @@ class CalendarTool:
                 action = "rescheduled"
                 if appt.status == AppointmentStatus.CANCELLED:
                     action = "cancelled"
-                
-                resolved_dict.append({
-                    "id": appt.id,
-                    "title": appt.title,
-                    "start_time": appt.start_time.isoformat(),
-                    "end_time": appt.end_time.isoformat(),
-                    "status": appt.status.value,
-                    "priority": appt.priority,
-                    "action": action,
-                    "type": self.get_appointment_type(appt)
-                })
-                
+
+                resolved_dict.append(
+                    {
+                        "id": appt.id,
+                        "title": appt.title,
+                        "start_time": appt.start_time.isoformat(),
+                        "end_time": appt.end_time.isoformat(),
+                        "status": appt.status.value,
+                        "priority": appt.priority,
+                        "action": action,
+                        "type": self.get_appointment_type(appt),
+                    }
+                )
+
             # Convert unresolved appointments to dict
             unresolved_dict = []
             for appt in unresolved:
-                unresolved_dict.append({
-                    "id": appt.id,
-                    "title": appt.title,
-                    "start_time": appt.start_time.isoformat(),
-                    "end_time": appt.end_time.isoformat(),
-                    "status": appt.status.value,
-                    "priority": appt.priority,
-                    "reason": "Cannot find suitable time or override equal/higher priority",
-                    "type": self.get_appointment_type(appt)
-                })
-                
+                unresolved_dict.append(
+                    {
+                        "id": appt.id,
+                        "title": appt.title,
+                        "start_time": appt.start_time.isoformat(),
+                        "end_time": appt.end_time.isoformat(),
+                        "status": appt.status.value,
+                        "priority": appt.priority,
+                        "reason": "Cannot find suitable time or override equal/higher priority",
+                        "type": self.get_appointment_type(appt),
+                    }
+                )
+
             return resolved_dict, unresolved_dict
         except Exception as e:
             print(f"Error in CalendarTool.resolve_conflicts: {e}")
@@ -244,10 +249,10 @@ class CalendarTool:
     def get_appointment_type(self, appointment):
         """
         Determine the type of appointment based on its title, description, and other attributes.
-        
+
         Args:
             appointment: The appointment object to categorize
-            
+
         Returns:
             String representing the appointment type (internal, client_meeting, personal, administrative, other)
         """

@@ -401,11 +401,13 @@ async def test_resolve_conflicts_with_type_based_strategies():
 
     # Create a calendar
     with session_maker() as session:
-        calendar = Calendar(name="Test Calendar", time_zone="UTC", agent_id="test-agent")
+        calendar = Calendar(
+            name="Test Calendar", time_zone="UTC", agent_id="test-agent"
+        )
         session.add(calendar)
         session.commit()
         calendar_id = calendar.id
-        
+
         # Create a high-priority client meeting (Mrs. Wang's showing)
         wang_showing = Appointment(
             calendar_id=calendar.id,
@@ -417,7 +419,7 @@ async def test_resolve_conflicts_with_type_based_strategies():
             priority=3,  # High priority
         )
         session.add(wang_showing)
-        
+
         # Create conflicting internal meetings
         internal_meeting1 = Appointment(
             calendar_id=calendar.id,
@@ -429,7 +431,7 @@ async def test_resolve_conflicts_with_type_based_strategies():
             priority=2,  # Medium priority
         )
         session.add(internal_meeting1)
-        
+
         internal_meeting2 = Appointment(
             calendar_id=calendar.id,
             title="Department planning",
@@ -440,7 +442,7 @@ async def test_resolve_conflicts_with_type_based_strategies():
             priority=2,  # Medium priority
         )
         session.add(internal_meeting2)
-        
+
         # Create another client meeting that conflicts
         other_client = Appointment(
             calendar_id=calendar.id,
@@ -452,27 +454,29 @@ async def test_resolve_conflicts_with_type_based_strategies():
             priority=3,  # High priority
         )
         session.add(other_client)
-        
+
         session.commit()
-        
+
         # Capture IDs before the session closes
         wang_showing_id = wang_showing.id
         internal_meeting1_id = internal_meeting1.id
         internal_meeting2_id = internal_meeting2.id
         other_client_id = other_client.id
-    
+
     # Create dependencies
     calendar_service = CalendarService(session_maker)
     calendar_tool = CalendarTool(calendar_service)
-    
+
     # Set the active calendar
     calendar_service.set_active_calendar(calendar_id)
-    
+
     # Create natural language prompt for the LLM
-    tomorrow_afternoon = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
-        hour=14, minute=0, second=0, microsecond=0
-    ).strftime("%B %d at %I:%M %p")
-    
+    tomorrow_afternoon = (
+        (datetime.now(timezone.utc) + timedelta(days=1))
+        .replace(hour=14, minute=0, second=0, microsecond=0)
+        .strftime("%B %d at %I:%M %p")
+    )
+
     prompt = f"""
     I have several conflicting appointments in my calendar:
     1. A high-priority client meeting with Mrs. Wang for a property showing
@@ -484,22 +488,20 @@ async def test_resolve_conflicts_with_type_based_strategies():
     - Reschedule client meetings to tomorrow afternoon around {tomorrow_afternoon}
     - Keep Mrs. Wang's showing as the highest priority
     """
-    
+
     # Create conversation history
     history = [Message(role="user", content=prompt)]
-    
+
     # Run the agent with the natural language prompt using the async version
-    result = await run_with_calendar(
-        prompt, history, calendar_service, calendar_id
-    )
-    
+    result = await run_with_calendar(prompt, history, calendar_service, calendar_id)
+
     # Print the result object structure for debugging
     print(f"Result type: {type(result)}")
     print(f"Result dir: {dir(result)}")
-    
+
     # Verify the response
     assert result is not None
-    
+
     # Check that internal meetings were cancelled
     with session_maker() as session:
         # Check that internal meetings are cancelled
@@ -507,23 +509,29 @@ async def test_resolve_conflicts_with_type_based_strategies():
         meeting2 = session.query(Appointment).filter_by(id=internal_meeting2_id).first()
         assert meeting1.status == AppointmentStatus.CANCELLED
         assert meeting2.status == AppointmentStatus.CANCELLED
-        
+
         # Check that client meetings were rescheduled to tomorrow afternoon
         wang_appt = session.query(Appointment).filter_by(id=wang_showing_id).first()
         other_appt = session.query(Appointment).filter_by(id=other_client_id).first()
-        
+
         # Due to SQLite timezone issues, we only check hours and minutes
         assert wang_appt.status == AppointmentStatus.CONFIRMED
         assert other_appt.status == AppointmentStatus.CONFIRMED
-        
+
         # Check that at least one of the client meetings was rescheduled to tomorrow
         tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
         tomorrow_start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow_end = tomorrow.replace(hour=23, minute=59, second=59, microsecond=999999)
-        
-        rescheduled_appointments = session.query(Appointment).filter(
-            Appointment.start_time >= tomorrow_start,
-            Appointment.start_time <= tomorrow_end
-        ).all()
-        
+        tomorrow_end = tomorrow.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+
+        rescheduled_appointments = (
+            session.query(Appointment)
+            .filter(
+                Appointment.start_time >= tomorrow_start,
+                Appointment.start_time <= tomorrow_end,
+            )
+            .all()
+        )
+
         assert len(rescheduled_appointments) > 0

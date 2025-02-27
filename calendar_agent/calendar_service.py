@@ -20,29 +20,29 @@ from .strategy_models import (
 def ensure_utc(dt: datetime) -> datetime:
     """
     Ensure datetime is UTC timezone-aware.
-    
+
     This function handles various edge cases:
     1. None timezone (naive datetime)
     2. Non-UTC timezone
     3. Already UTC timezone
-    
+
     Args:
         dt: The datetime to convert
-        
+
     Returns:
         UTC timezone-aware datetime
     """
     if dt is None:
         return None
-        
+
     # If datetime is naive (no timezone), assume it's UTC
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
-        
+
     # If datetime has a timezone but it's not UTC, convert it
     if dt.tzinfo != timezone.utc:
         return dt.astimezone(timezone.utc)
-        
+
     # Already UTC timezone-aware
     return dt
 
@@ -672,7 +672,9 @@ class CalendarService:
             return "other"
 
         title_lower = appointment.title.lower() if appointment.title else ""
-        description_lower = appointment.description.lower() if appointment.description else ""
+        description_lower = (
+            appointment.description.lower() if appointment.description else ""
+        )
 
         # Define type indicators with weights
         type_indicators = {
@@ -865,9 +867,7 @@ class CalendarService:
                 for day_offset in range(
                     (window_end.date() - window_start.date()).days + 1
                 ):
-                    current_date = window_start.date() + timedelta(
-                        days=day_offset
-                    )
+                    current_date = window_start.date() + timedelta(days=day_offset)
 
                     # Skip if this date is outside our window
                     if (
