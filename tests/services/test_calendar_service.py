@@ -10,12 +10,6 @@ from sqlalchemy.orm import sessionmaker
 from calendar_agent.calendar_service import CalendarService
 from calendar_agent.config import DatabaseConfig
 from calendar_agent.models import Appointment, AppointmentStatus, Base, Calendar
-from calendar_agent.strategy_models import (
-    CancelStrategy,
-    ConflictResolutionStrategies,
-    RescheduleStrategy,
-    TypeBasedStrategies,
-)
 
 
 def utc_datetime(*args, **kwargs) -> datetime:
@@ -154,8 +148,6 @@ def test_high_priority_overrides_low_priority_tentative(
     assert len(conflicts) == 1
     assert conflicts[0].id == apt1.id
 
-    # In our enhanced implementation, the original appointment status might be CANCELLED or still TENTATIVE
-    # depending on how conflict resolution is configured. Let's check that it's either CANCELLED or TENTATIVE
     with service.session_factory() as session:
         original_apt = (
             session.query(Appointment).filter(Appointment.id == apt1.id).first()
@@ -279,7 +271,7 @@ def test_cancel_appointment(service, calendar):
     assert appointment is not None
 
     # Cancel the appointment
-    success = service.cancel_appointment(appointment.id)
+    success = service.cancel_appointment(calendar.id, appointment.id)
     assert success
 
     # Verify the appointment is cancelled
@@ -343,7 +335,7 @@ def test_get_appointments_in_range(service, calendar):
 
 
 def test_priority_conflict_resolution(service, calendar, tomorrow_9am):
-    """Test resolving conflicts based on priority."""
+    """Test handling conflicts based on priority using update_appointment."""
     # Schedule a low priority appointment
     apt_tour_start = tomorrow_9am.replace(hour=14)
     apt_tour_end = apt_tour_start + timedelta(hours=1)
@@ -372,240 +364,64 @@ def test_priority_conflict_resolution(service, calendar, tomorrow_9am):
     assert len(conflicts) == 1
     assert conflicts[0].id == apt_tour.id
 
-    # Resolve the conflict with priority-based strategy
-    strategies = ConflictResolutionStrategies(
-        by_priority=True,
-        fallback=RescheduleStrategy(
-            window_days=1, preferred_hours=[9, 10, 11, 14, 15, 16, 17, 18]
-        ),
+    # Manually resolve the conflict by updating appointments
+    # 1. Cancel the lower priority appointment
+    service.update_appointment(
+        calendar_id=calendar.id,
+        appointment_id=apt_tour.id,
+        status=AppointmentStatus.CANCELLED,
     )
 
-    resolved, unresolved = service.resolve_conflicts(
-        for_appointment_id=client_meeting.id, strategies=strategies
+    # 2. Confirm the higher priority appointment
+    service.update_appointment(
+        calendar_id=calendar.id,
+        appointment_id=client_meeting.id,
+        status=AppointmentStatus.CONFIRMED,
     )
 
-    # Should have resolved the conflict
-    assert len(resolved) == 1
-    assert len(unresolved) == 0
-
-    # The apartment tour should be rescheduled or cancelled
-    apt_tour_resolved = resolved[0]
-    assert apt_tour_resolved.id == apt_tour.id
-
-    # Check that the original appointment is no longer CONFIRMED
+    # Verify the changes were applied
     with service.session_factory() as session:
-        original_apt = (
+        # Check that the apartment tour is cancelled
+        apt_tour_updated = (
             session.query(Appointment).filter(Appointment.id == apt_tour.id).first()
         )
-        assert original_apt.status != AppointmentStatus.CONFIRMED
+        assert apt_tour_updated.status == AppointmentStatus.CANCELLED
 
-    # If it was rescheduled, check that it's during business hours
-    if apt_tour_resolved.status == AppointmentStatus.CONFIRMED:
-        assert apt_tour_resolved.start_time.hour >= 9
-        assert apt_tour_resolved.start_time.hour < 19
-
-
-def test_enhanced_conflict_resolution(service, calendar, tomorrow_9am):
-    """Test enhanced conflict resolution with different appointment types and fallback strategies."""
-    # 1. Setup existing appointments of different types
-
-    # Create an internal meeting at 10am
-    internal_meeting_start = tomorrow_9am.replace(hour=10, minute=0)
-    internal_meeting_end = internal_meeting_start + timedelta(hours=1)
-    internal_meeting_success, internal_meeting, _ = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Team Planning Meeting",
-        start_time=internal_meeting_start,
-        end_time=internal_meeting_end,
-        status=AppointmentStatus.CONFIRMED,
-        priority=3,  # Medium priority
-    )
-    assert internal_meeting_success
-
-    # Create a client meeting at 2pm
-    client_meeting_start = tomorrow_9am.replace(hour=14, minute=0)
-    client_meeting_end = client_meeting_start + timedelta(hours=1)
-    client_meeting_success, client_meeting, _ = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Property Viewing with Client",
-        start_time=client_meeting_start,
-        end_time=client_meeting_end,
-        status=AppointmentStatus.CONFIRMED,
-        priority=2,  # Higher priority
-    )
-    assert client_meeting_success
-
-    # Create a personal appointment at 4pm
-    personal_appt_start = tomorrow_9am.replace(hour=16, minute=0)
-    personal_appt_end = personal_appt_start + timedelta(minutes=30)
-    personal_appt_success, personal_appt, _ = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Doctor Appointment",
-        start_time=personal_appt_start,
-        end_time=personal_appt_end,
-        status=AppointmentStatus.CONFIRMED,
-        priority=4,  # Lower priority
-    )
-    assert personal_appt_success
-
-    # 2. Schedule a high-priority all-day training that conflicts with everything
-    training_start = tomorrow_9am.replace(hour=9, minute=0)
-    training_end = tomorrow_9am.replace(hour=17, minute=0)
-
-    # First, create the training as TENTATIVE to avoid overriding CONFIRMED appointments
-    training_success, training_appt, conflicts = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Mandatory Real Estate Certification Training",
-        start_time=training_start,
-        end_time=training_end,
-        status=AppointmentStatus.TENTATIVE,
-        priority=1,  # Highest priority
-    )
-
-    # The appointment should be created successfully
-    assert training_success
-    assert training_appt is not None
-
-    # Verify that we received all the conflicts
-    assert len(conflicts) == 3
-    conflict_ids = [appt.id for appt in conflicts]
-    assert internal_meeting.id in conflict_ids
-    assert client_meeting.id in conflict_ids
-    assert personal_appt.id in conflict_ids
-
-    # 3. Now resolve the conflicts with type-based strategies and fallbacks
-    next_day_date = (tomorrow_9am + timedelta(days=1)).date()
-    day_after_date = (tomorrow_9am + timedelta(days=2)).date()
-
-    # Create structured strategies
-    strategies = ConflictResolutionStrategies(
-        by_type=TypeBasedStrategies(
-            internal=RescheduleStrategy(
-                target_window=f"{next_day_date.isoformat()}T09:00-12:00",
-                preferred_hours=[9, 10],
-                avoid_lunch_hour=True,
-            ),
-            client_meeting=RescheduleStrategy(
-                target_window=f"{next_day_date.isoformat()}T14:00-17:00",
-                preferred_hours=[14, 15, 16],
-            ),
-            personal=RescheduleStrategy(
-                target_window=f"{day_after_date.isoformat()}T09:00-17:00"
-            ),
-        ),
-        by_priority=True,
-        fallback=RescheduleStrategy(
-            window_days=7, preferred_hours=[9, 10, 11, 14, 15, 16]
-        ),
-    )
-
-    resolved, unresolved = service.resolve_conflicts(
-        for_appointment_id=training_appt.id, strategies=strategies
-    )
-
-    # All conflicts should be resolved
-    assert len(resolved) == 3
-    assert len(unresolved) == 0
-
-    # Get the resolved appointments by ID
-    resolved_by_id = {appt.id: appt for appt in resolved}
-
-    # Verify that internal meeting was rescheduled
-    internal_meeting_resolved = resolved_by_id.get(internal_meeting.id)
-    assert internal_meeting_resolved is not None
-    # In our implementation, appointments might be CANCELLED and recreated with new IDs
-    # So we'll check that the original appointment is no longer CONFIRMED
-    with service.session_factory() as session:
-        original_internal = (
-            session.query(Appointment)
-            .filter(Appointment.id == internal_meeting.id)
-            .first()
-        )
-        assert original_internal.status != AppointmentStatus.CONFIRMED
-
-    # Verify that client meeting was rescheduled
-    client_meeting_resolved = resolved_by_id.get(client_meeting.id)
-    assert client_meeting_resolved is not None
-    # Check that the original appointment is no longer CONFIRMED
-    with service.session_factory() as session:
-        original_client = (
+        # Check that the client meeting is confirmed
+        client_meeting_updated = (
             session.query(Appointment)
             .filter(Appointment.id == client_meeting.id)
             .first()
         )
-        assert original_client.status != AppointmentStatus.CONFIRMED
+        assert client_meeting_updated.status == AppointmentStatus.CONFIRMED
 
-    # Verify that personal appointment was rescheduled
-    personal_appt_resolved = resolved_by_id.get(personal_appt.id)
-    assert personal_appt_resolved is not None
-    # Check that the original appointment is no longer CONFIRMED
-    with service.session_factory() as session:
-        original_personal = (
-            session.query(Appointment)
-            .filter(Appointment.id == personal_appt.id)
-            .first()
+    # Alternative approach: Reschedule the lower priority appointment
+    # Find a new time slot for the apartment tour
+    rescheduled_start = tomorrow_9am.replace(hour=16)  # 4pm
+    rescheduled_end = rescheduled_start + timedelta(hours=1)
+
+    # Check if the new time slot is available
+    is_available = service.check_availability(
+        calendar_id=calendar.id, start_time=rescheduled_start, end_time=rescheduled_end
+    )
+
+    if is_available:
+        # Reschedule the appointment
+        service.update_appointment(
+            calendar_id=calendar.id,
+            appointment_id=apt_tour.id,
+            start_time=rescheduled_start,
+            end_time=rescheduled_end,
+            status=AppointmentStatus.CONFIRMED,
         )
-        assert original_personal.status != AppointmentStatus.CONFIRMED
 
-    # 4. Test fallback strategy with an appointment type not explicitly handled
-    admin_task_start = tomorrow_9am.replace(hour=11, minute=0)
-    admin_task_end = admin_task_start + timedelta(hours=1)
-    admin_task_success, admin_task, _ = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Expense Report Filing",
-        start_time=admin_task_start,
-        end_time=admin_task_end,
-        status=AppointmentStatus.CONFIRMED,
-        priority=4,  # Lower priority
-    )
-    assert admin_task_success
-
-    # This should conflict with our training
-    _, _, admin_conflicts = service.schedule_appointment(
-        calendar_id=calendar.id,
-        title="Another Training",
-        start_time=training_start,
-        end_time=training_end,
-        status=AppointmentStatus.TENTATIVE,
-    )
-
-    assert any(conflict.id == admin_task.id for conflict in admin_conflicts)
-
-    # Resolve with the same strategies - should use fallback for admin task
-    fallback_strategies = ConflictResolutionStrategies(
-        by_type=TypeBasedStrategies(
-            internal=RescheduleStrategy(
-                target_window=f"{next_day_date.isoformat()}T09:00-12:00"
-            ),
-            client_meeting=RescheduleStrategy(
-                target_window=f"{next_day_date.isoformat()}T14:00-17:00"
-            ),
-        ),
-        fallback=RescheduleStrategy(
-            window_days=3, preferred_hours=[9, 10, 11, 14, 15, 16]
-        ),
-    )
-
-    resolved2, unresolved2 = service.resolve_conflicts(
-        for_appointment_id=training_appt.id, strategies=fallback_strategies
-    )
-
-    # The admin task should be resolved using fallback
-    # Our implementation may resolve multiple conflicts at once
-    assert len(resolved2) > 0
-    assert len(unresolved2) == 0
-
-    # Find the admin task in the resolved appointments
-    admin_task_resolved = None
-    for appt in resolved2:
-        if appt.id == admin_task.id:
-            admin_task_resolved = appt
-            break
-
-    assert admin_task_resolved is not None
-
-    # Should be during one of the preferred hours
-    assert admin_task_resolved.start_time.hour in [9, 10, 11, 14, 15, 16]
+        # Verify the rescheduling
+        with service.session_factory() as session:
+            rescheduled_apt = (
+                session.query(Appointment).filter(Appointment.id == apt_tour.id).first()
+            )
+            assert rescheduled_apt.start_time.hour == 16
+            assert rescheduled_apt.status == AppointmentStatus.CONFIRMED
 
 
 def test_is_day_underutilized(service, calendar, tomorrow_9am):
@@ -654,7 +470,7 @@ def test_cancel_appointment(service, calendar):
     assert appointment is not None
 
     # Cancel the appointment
-    success = service.cancel_appointment(appointment.id)
+    success = service.cancel_appointment(calendar.id, appointment.id)
     assert success
 
     # Verify the appointment is cancelled

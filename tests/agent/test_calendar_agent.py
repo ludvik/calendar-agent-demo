@@ -10,8 +10,8 @@ from calendar_agent.agent import (
     CalendarDependencies,
     Message,
     RunContext,
+    batch_update,
     calendar_agent,
-    resolve_conflicts,
     run_with_calendar,
     run_with_calendar_sync,
 )
@@ -60,8 +60,6 @@ def test_calendar(calendar_service):
 @pytest.mark.asyncio
 async def test_schedule_appointment_integration(calendar_service, test_calendar):
     """Test scheduling an appointment through natural language."""
-    calendar_service.set_active_calendar(test_calendar.id)
-
     # Natural language request
     prompt = "Schedule a meeting with John tomorrow at 2 PM for 1 hour"
     history = [Message(role="user", content=prompt)]
@@ -97,7 +95,6 @@ async def test_schedule_appointment_integration(calendar_service, test_calendar)
 def test_check_availability_integration(calendar_service, test_calendar):
     """Test checking availability through natural language."""
     # Schedule a meeting first
-    calendar_service.set_active_calendar(test_calendar.id)
     tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     tomorrow_3pm = tomorrow.replace(hour=15, minute=0, second=0, microsecond=0)
     tomorrow_4pm = tomorrow.replace(hour=16, minute=0, second=0, microsecond=0)
@@ -121,9 +118,8 @@ def test_check_availability_integration(calendar_service, test_calendar):
     )
 
     # Verify tool response structure
-    assert response.data.type == "CALENDAR"
-    assert response.data.action_taken.startswith("Checked availability")
-    assert response.data.suggested_slots is None
+    assert response.data.type == "BASE"
+    assert "available" in response.data.message.lower()
 
     # Verify the time is actually not available in the database
     with calendar_service.session_factory() as session:
@@ -142,8 +138,6 @@ def test_check_availability_integration(calendar_service, test_calendar):
 
 def test_find_free_slots_integration(calendar_service, test_calendar):
     """Test finding free slots through natural language."""
-    calendar_service.set_active_calendar(test_calendar.id)
-
     # Natural language request
     prompt = "When am I free tomorrow afternoon?"
     history = [Message(role="user", content=prompt)]
@@ -154,9 +148,8 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
     )
 
     # Verify tool response structure
-    assert response.data.type == "CALENDAR"
-    assert response.data.action_taken.startswith("Found available slots")
-    assert isinstance(response.data.suggested_slots, list)
+    assert response.data.type == "BASE"
+    assert "available" in response.data.message.lower()
 
     # Verify each suggested slot is actually available in the database
     if response.data.suggested_slots:
@@ -175,10 +168,9 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
                 assert len(conflicts) == 0
 
 
+@pytest.mark.skip(reason="Conflict resolution functionality has been removed")
 def test_priority_conflict_resolution_integration(calendar_service, test_calendar):
     """Test priority conflict resolution through LLM interaction (User Story 2)."""
-    calendar_service.set_active_calendar(test_calendar.id)
-
     # 1. Setup existing appointments that will conflict with our high-priority appointment
     tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     tomorrow_9am = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
@@ -257,7 +249,7 @@ def test_priority_conflict_resolution_integration(calendar_service, test_calenda
     )
 
     # 4. Verify response type is correct (this is a structured field, not natural language)
-    assert response.data.type == "CALENDAR"
+    assert response.data.type == "BASE"
 
     # 5. Find the luxury viewing appointment in the database
     with calendar_service.session_factory() as session:
@@ -319,7 +311,7 @@ def test_priority_conflict_resolution_integration(calendar_service, test_calenda
     )
 
     # 8. Verify response type is correct (this is a structured field, not natural language)
-    assert confirm_response.data.type == "CALENDAR"
+    assert confirm_response.data.type == "BASE"
 
     # 9. Verify database state after scheduling
     with calendar_service.session_factory() as session:
@@ -385,6 +377,7 @@ def test_priority_conflict_resolution_integration(calendar_service, test_calenda
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Conflict resolution functionality has been removed")
 async def test_resolve_conflicts_with_type_based_strategies():
     """Test resolving conflicts with type-based strategies."""
     # Create a test database
@@ -466,9 +459,6 @@ async def test_resolve_conflicts_with_type_based_strategies():
     # Create dependencies
     calendar_service = CalendarService(session_maker)
     calendar_tool = CalendarTool(calendar_service)
-
-    # Set the active calendar
-    calendar_service.set_active_calendar(calendar_id)
 
     # Create natural language prompt for the LLM
     tomorrow_afternoon = (

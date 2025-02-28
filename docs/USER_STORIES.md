@@ -64,8 +64,8 @@ schedule_appointment(
         "priority": 2
     },
     "conflicts": [
-        {
-            "id": 102,
+    {
+        "id": 102,
             "title": "Apartment Tour",
             "time": "2025-03-01T15:30",
             "duration": 60,
@@ -87,8 +87,8 @@ schedule_appointment(
             "duration": 30,
             "priority": 3,
             "type": "internal"
-        }
-    ]
+    }
+]
 }
 ```
 
@@ -105,74 +105,24 @@ How would you like me to handle these conflicting appointments?"
 
 **Tool Calls** (Second Round):
 ```python
-# Batch resolve conflicts for the already created appointment
-resolve_conflicts(
-    for_appointment_id=201,
-    strategies={
-        "by_type": {
-            "internal": {"action": "reschedule", "target_window": "2025-03-02T09:00-12:00"},
-            "client_meeting": {"action": "reschedule", "target_window": "2025-03-01T17:00-19:00"}
-        }
-    }
-)
-```
-
-**Tool Response**:
-```json
-{
-    "resolved_conflicts": [
+batch_update(
+    calendar_id=1,
+    updates=[
         {
-            "id": 103,
-            "title": "Team Meeting",
-            "action": "rescheduled",
-            "original_time": "2025-03-01T16:00",
-            "new_time": "2025-03-02T09:30",
-            "notification_sent": true
+            "appointment_id": 102,
+            "start_time": "2025-03-01T14:00",
+            "end_time": "2025-03-01T15:00",
+            "status": "CONFIRMED"
         },
         {
-            "id": 104,
-            "title": "Property Paperwork Review",
-            "action": "rescheduled",
-            "original_time": "2025-03-01T16:30",
-            "new_time": "2025-03-02T10:30",
-            "notification_sent": true
-        }
-    ],
-    "unresolved_conflicts": [
-        {
-            "id": 102,
-            "title": "Apartment Tour",
-            "reason": "No available slots in target window",
-            "alternatives": [
-                {"time": "2025-03-01T09:00", "duration": 60},
-                {"time": "2025-03-02T15:00", "duration": 60}
-            ]
+            "appointment_id": 103,
+            "title": "Important Client Meeting",
+            "start_time": "2025-03-01T09:00",
+            "end_time": "2025-03-01T10:00",
+            "priority": 1,
+            "status": "CONFIRMED"
         }
     ]
-}
-```
-
-**Agent**: "I've handled the conflicting appointments:
-
-Successfully rescheduled:
-   - Team Meeting → tomorrow at 9:30am
-   - Property Paperwork Review → tomorrow at 10:30am
-
-Could not reschedule the Apartment Tour for later today. Options:
-   1. Tomorrow morning at 9:00am
-   2. Tomorrow afternoon at 3:00pm
-   
-How would you like to handle the Apartment Tour?"
-
-**User**: "Let's go with tomorrow at 3pm for the apartment tour."
-
-**Tool Calls** (Third Round):
-```python
-reschedule_appointment(
-    appointment_id=102,
-    new_time="2025-03-02T15:00",
-    duration=60,
-    send_notification=true
 )
 ```
 
@@ -180,314 +130,47 @@ reschedule_appointment(
 ```json
 {
     "success": true,
-    "appointment": {
-        "id": 102,
-        "title": "Apartment Tour",
-        "original_time": "2025-03-01T15:30",
-        "new_time": "2025-03-02T15:00",
-        "notification_sent": true
-    }
-}
-```
-
-**Agent**: "Perfect! I've completed all scheduling:
-
-1. Luxury Home Viewing confirmed for today 3:00-5:00 PM
-2. Apartment Tour moved to tomorrow at 3:00 PM
-3. Team Meeting moved to tomorrow at 9:30 AM
-4. Property Paperwork Review moved to tomorrow at 10:30 AM
-
-All affected parties have been notified. Is there anything else you need for the luxury home showing?"
-
----
-
-### 3. Flexible Duration Adjustment
-**Scenario**:  
-Client requests extending a showing from 60 to 90 minutes
-
-**User Input**:  
-"Can we extend the 2pm showing to 90 minutes?"
-
-**Tool Calls**:
-```python
-check_availability(
-    appointment_id=205,
-    new_duration=90
-)
-```
-
-**Tool Response**:
-```json
-{
-    "available": false,
-    "conflicts": [
-        {"id": 207, "title": "Team Meeting", "priority": 3}
+    "updated_appointments": [
+        {
+            "id": 102,
+            "title": "Apartment Tour - 456 Oak Ave",
+            "start_time": "2025-03-01T14:00",
+            "end_time": "2025-03-01T15:00",
+            "status": "CONFIRMED"
+        },
+        {
+            "id": 103,
+            "title": "Important Client Meeting",
+            "start_time": "2025-03-01T09:00",
+            "end_time": "2025-03-01T10:00",
+            "priority": 1,
+            "status": "CONFIRMED"
+        }
     ],
-    "resolution_options": ["reschedule_conflict", "split_showings"]
+    "conflicts": []
 }
 ```
 
 **Agent Response**:  
-"Extension would conflict with existing appointments. Suggest rescheduling conflicting meeting or splitting showing into two sessions."
+"I've rescheduled your apartment tour to 2:00 PM tomorrow and confirmed your important client meeting for 9:00 AM. Both appointments are now set."
 
 ---
 
-### 5. VIP Client Priority Escalation
+### 3. Propose n Available Time Slots
 **Scenario**:  
-A VIP client needs immediate attention during busy hours
+Agent needs to find multiple available time slots for a meeting
 
 **User Input**:  
-"Make space for Mr. Smith's urgent request at 4pm today"
+"Find me 3 available 1-hour slots for a client meeting next week between 9am and 5pm"
 
 **Tool Calls**:
 ```python
-smart_schedule(
-    title="VIP Client Meeting",
-    desired_time="2025-03-01T16:00",
+find_available_slots(
+    calendar_id=1,
+    start_date="2025-03-03",
+    end_date="2025-03-07",
     duration=60,
-    priority=1
-)
-```
-
-**Tool Response**:
-```json
-{
-    "scheduled": true,
-    "method": "override",
-    "cancelled_appointments": [301, 302],
-    "client_notifications_sent": 2
-}
-```
-
-**Agent Response**:  
-"Scheduled VIP meeting at 4:00 PM by rescheduling 2 lower-priority appointments. Clients have been notified."
-
----
-
-## Extended Use Cases
-
-### 3. Batch Open House Management
-**Scenario**:  
-Coordinating weekend open houses for 3 new luxury properties
-
-**User Input**:  
-"Set up open houses for 789 Elite Blvd, Sat-Sun 10am-4pm"
-
-**Tool Calls**:
-```python
-bulk_schedule_appointments(
-    properties=["789 Elite Blvd"],
-    days=["2025-03-08", "2025-03-09"],
-    window_start="10:00",
-    window_end="16:00",
-    priority=2
-)
-```
-
-**Tool Response**:
-```json
-{
-    "scheduled_count": 6,
-    "conflicts_resolved": 2,
-    "failed_slots": []
-}
-```
-
-**Agent Response**:  
-"Created 6 open house slots. Resolved 2 scheduling conflicts. All slots confirmed."
-
----
-
-### 6. Lead Follow-up Scheduling
-**Scenario**:  
-Schedule follow-up calls with new leads
-
-**User Input**:  
-"Schedule follow-up with lead 101 for tomorrow 10am"
-
-**Tool Calls**:
-```python
-schedule_follow_up(
-    lead_id=101,
-    follow_up_time="2025-03-02T10:00"
-)
-```
-
-**Tool Response**:
-```json
-{
-    "scheduled": true,
-    "follow_up_id": 201,
-    "reminder_sent": true
-}
-```
-
-**Agent Response**:  
-"Follow-up scheduled for tomorrow 10:00 AM. Reminder sent to lead."
-
----
-
-### 7. Open House Promotion
-**Scenario**:  
-Promote open house events on social media
-
-**User Input**:  
-"Promote open house at 789 Elite Blvd on Facebook and Twitter"
-
-**Tool Calls**:
-```python
-promote_open_house(
-    event_id=202,
-    social_media_platforms=["Facebook", "Twitter"]
-)
-```
-
-**Tool Response**:
-```json
-{
-    "promoted": true,
-    "posts": [
-        {"platform": "Facebook", "post_id": 123},
-        {"platform": "Twitter", "post_id": 456}
-    ]
-}
-```
-
-**Agent Response**:  
-"Open house promoted on Facebook and Twitter. Posts created."
-
----
-
-### 8. Client Communication Automation
-**Scenario**:  
-Automate routine client communication, such as sending reminders and updates
-
-**User Input**:  
-"Send reminder to client 303 about upcoming showing"
-
-**Tool Calls**:
-```python
-automate_client_communication(
-    client_id=303,
-    communication_type="reminder"
-)
-```
-
-**Tool Response**:
-```json
-{
-    "sent": true,
-    "message_id": 901
-}
-```
-
-**Agent Response**:  
-"Reminder sent to client. Message ID: 901."
-
----
-
-### 9. Market Analysis Report Generation
-**Scenario**:  
-Generate market analysis reports for clients
-
-**User Input**:  
-"Generate market analysis report for client 404"
-
-**Tool Calls**:
-```python
-generate_market_analysis_report(
-    client_id=404,
-    report_type="monthly"
-)
-```
-
-**Tool Response**:
-```json
-{
-    "generated": true,
-    "report_id": 111,
-    "report_url": "https://example.com/report/111"
-}
-```
-
-**Agent Response**:  
-"Market analysis report generated. Report ID: 111. URL: https://example.com/report/111."
-
----
-
-### 10. Transaction Management
-**Scenario**:  
-Manage transactions, including document signing and payment processing
-
-**User Input**:  
-"Process payment for transaction 505"
-
-**Tool Calls**:
-```python
-manage_transaction(
-    transaction_id=505,
-    action="process_payment"
-)
-```
-
-**Tool Response**:
-```json
-{
-    "processed": true,
-    "payment_id": 222,
-    "payment_status": "paid"
-}
-```
-
-**Agent Response**:  
-"Payment processed for transaction 505. Payment ID: 222. Status: Paid."
-
----
-
-## Extended Use Cases
-
-### 1. Handling Last-Minute Cancellations
-**Scenario**:  
-Client cancels Thursday morning showing, agent Sarah needs to quickly fill this gap.
-
-**User Input**:  
-"Client canceled Thursday 9-11am showing. Find something to move into this slot."
-
-**Tool Calls**:
-```python
-reschedule_low_priority(
-    target_window="2025-03-06T09:00-11:00",
-    min_priority=3
-)
-```
-
-**Tool Response**:
-```json
-[
-    {
-        "original_appointment": {"id": 305, "title": "Investment Property Review"},
-        "new_time": "2025-03-06T09:30-10:30",
-        "client_notified": true
-    }
-]
-```
-
----
-
-### 2. Finding Multiple Available Slots
-**Scenario**:  
-Agent needs to propose 3 viable time slots across the next week for a client meeting.
-
-**User Input**:  
-"Find 3 times over the next week I could offer to my VIP client for a 2-hour meeting."
-
-**Tool Calls**:
-```python
-find_optimal_slots(
-    time_range=("2025-03-01T09:00", "2025-03-07T17:00"),
-    duration=120,
-    min_open_score=0.7,  # Day openness threshold 
-    preferred_hours=[(9,12), (14,17)],
+    time_range=("09:00", "17:00"),
     max_results=3
 )
 ```
@@ -495,21 +178,73 @@ find_optimal_slots(
 **Tool Response**:
 ```json
 {
-    "recommended_slots": [
-        {"start": "2025-03-01T10:00", "end": "2025-03-01T12:00", "score": 0.85},
-        {"start": "2025-03-03T14:00", "end": "2025-03-03T16:00", "score": 0.78},
-        {"start": "2025-03-05T09:30", "end": "2025-03-05T11:30", "score": 0.72}
-    ],
-    "day_analysis": {
-        "2025-03-01": {"open_score": 0.85, "meeting_density": 0.2},
-        "2025-03-03": {"open_score": 0.78, "meeting_density": 0.15},
-        "2025-03-05": {"open_score": 0.72, "meeting_density": 0.3}
-    }
+    "available_slots": [
+        {"start": "2025-03-03T10:00", "end": "2025-03-03T11:00"},
+        {"start": "2025-03-05T14:00", "end": "2025-03-05T15:00"},
+        {"start": "2025-03-07T09:00", "end": "2025-03-07T10:00"}
+    ]
 }
 ```
 
-**Verification Points**:  
- Intelligently evaluates day openness using scoring algorithm  
- Respects client's preferred working hours  
- Prioritizes days with lower meeting density  
- Provides detailed day-by-day analysis
+**Agent Response**:  
+"I found 3 available time slots for your client meeting next week:
+1. Monday, March 3rd at 10:00 AM
+2. Wednesday, March 5th at 2:00 PM
+3. Friday, March 7th at 9:00 AM
+Which one would you prefer?"
+
+---
+
+### 4. Identify Underutilized Days
+**Scenario**:  
+Agent wants to identify days with too much free time to schedule additional work
+
+**User Input**:  
+"Which day next week is least busy so I can schedule some prospecting calls?"
+
+**Tool Calls**:
+```python
+check_day_availability(
+    calendar_id=1,
+    start_date="2025-03-03",
+    end_date="2025-03-07",
+    time_range=("09:00", "17:00"),
+)
+```
+
+**Tool Response**:
+```json
+{
+    "underutilized_days": [
+        {
+            "date": "2025-03-05",
+            "free_hours": 6.5,
+            "largest_block": {
+                "start": "2025-03-05T10:30",
+                "end": "2025-03-05T17:00"
+            },
+            "appointment_count": 1
+        },
+        {
+            "date": "2025-03-07",
+            "free_hours": 5.0,
+            "largest_block": {
+                "start": "2025-03-07T12:00",
+                "end": "2025-03-07T17:00"
+            },
+            "appointment_count": 3
+        }
+    ],
+    "busiest_day": {
+        "date": "2025-03-04",
+        "free_hours": 1.5,
+        "appointment_count": 6
+    },
+    "recommendation": "2025-03-05"
+}
+```
+
+**Agent Response**:  
+"Based on your schedule for next week, Wednesday (March 5th) is your least busy day with 6.5 hours of free time. You have a large block available from 10:30 AM to 5:00 PM that would be perfect for scheduling prospecting calls. Friday (March 7th) is your second most open day with 5 hours available, including a continuous block from noon to 5:00 PM. Would you like me to block some time on Wednesday for your prospecting calls?"
+
+## Extended Use Cases
