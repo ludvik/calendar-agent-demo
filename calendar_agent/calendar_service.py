@@ -1,4 +1,13 @@
-"""Calendar service implementation using SQLite."""
+"""Calendar service implementation using SQLite.
+
+Note on timezone handling:
+- This service internally works with UTC timezone for all datetime operations
+- SQLite has limitations with timezone storage (stores datetimes without timezone info)
+- The ensure_utc() function is used to normalize all datetimes to UTC
+- Time display/formatting is handled at the agent layer, not in this service
+- In this demo version, full cross-timezone support is limited
+- For production use, consider using a database with better timezone support
+"""
 
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -52,8 +61,11 @@ class CalendarService:
             session_factory: SQLAlchemy session factory
         """
         self.session_factory = session_factory
-        self.business_start = time(9, 0)  # 9 AM
-        self.business_end = time(17, 0)  # 5 PM
+        
+        # Business hours are defined in local time (9 AM - 5 PM)
+        # For internal calculations, these will be converted to UTC as needed
+        self.business_start = time(9, 0)  # 9 AM local time
+        self.business_end = time(17, 0)  # 5 PM local time
         self.min_busy_hours = 4  # Threshold for considering a day "busy"
 
     def create_calendar(
@@ -209,17 +221,51 @@ class CalendarService:
         end_time = ensure_utc(end_time)
 
         available_slots = []
-        current_time = start_time
+        
+        # Helper function to round time to nearest 30-minute interval
+        def round_to_30min(dt: datetime, round_up: bool = False) -> datetime:
+            minute = dt.minute
+            if round_up:
+                # Round up to next 30 minutes
+                rounded_minute = ((minute // 30) + (1 if minute % 30 > 0 else 0)) * 30
+                if rounded_minute == 60:
+                    return dt.replace(hour=dt.hour + 1, minute=0, second=0, microsecond=0)
+                else:
+                    return dt.replace(minute=rounded_minute, second=0, microsecond=0)
+            else:
+                # Round down to previous 30 minutes
+                rounded_minute = (minute // 30) * 30
+                return dt.replace(minute=rounded_minute, second=0, microsecond=0)
+        
+        # Round start_time up to next 30-minute interval
+        current_time = round_to_30min(start_time, round_up=True)
+        
+        # Use class attributes for business hours
+        
+        # Helper function to check if time is within business hours
+        def is_within_business_hours(dt: datetime) -> bool:
+            # Convert UTC time to local time for business hours comparison
+            if dt.tzinfo == timezone.utc:
+                local_dt = dt.astimezone(datetime.now().astimezone().tzinfo)
+            else:
+                local_dt = dt
+            
+            t = local_dt.time()
+            return self.business_start <= t < self.business_end
 
         while current_time + timedelta(minutes=duration) <= end_time:
-            slot_end = current_time + timedelta(minutes=duration)
-            if self.is_time_slot_available(
-                calendar_id, current_time, slot_end, priority
-            ):
-                available_slots.append((current_time, slot_end))
-                if len(available_slots) >= max_slots:
-                    break
-            current_time += timedelta(minutes=duration)
+            # Only consider slots that are within business hours
+            if is_within_business_hours(current_time) and is_within_business_hours(current_time + timedelta(minutes=duration-1)):
+                slot_end = current_time + timedelta(minutes=duration)
+                if self.is_time_slot_available(
+                    calendar_id, current_time, slot_end, priority
+                ):
+                    available_slots.append((current_time, slot_end))
+                    if len(available_slots) >= max_slots:
+                        break
+            
+            # Increment by 30 minutes for half-hour alignment
+            current_time += timedelta(minutes=30)
 
         return available_slots
 
@@ -330,23 +376,42 @@ class CalendarService:
         """
         title = appointment.title.lower() if appointment.title else ""
         description = appointment.description.lower() if appointment.description else ""
-        
+
         # Check for client meetings
-        if any(term in title or term in description for term in ["client", "customer", "external", "meeting with"]):
+        if any(
+            term in title or term in description
+            for term in ["client", "customer", "external", "meeting with"]
+        ):
             return "client_meeting"
-        
+
         # Check for internal meetings
-        if any(term in title or term in description for term in ["team", "internal", "staff", "sync", "standup", "review"]):
+        if any(
+            term in title or term in description
+            for term in ["team", "internal", "staff", "sync", "standup", "review"]
+        ):
             return "internal"
-        
+
         # Check for personal appointments
-        if any(term in title or term in description for term in ["doctor", "dentist", "personal", "break", "lunch", "appointment"]):
+        if any(
+            term in title or term in description
+            for term in [
+                "doctor",
+                "dentist",
+                "personal",
+                "break",
+                "lunch",
+                "appointment",
+            ]
+        ):
             return "personal"
-        
+
         # Check for administrative tasks
-        if any(term in title or term in description for term in ["admin", "paperwork", "report", "planning", "email"]):
+        if any(
+            term in title or term in description
+            for term in ["admin", "paperwork", "report", "planning", "email"]
+        ):
             return "administrative"
-        
+
         # Default type
         return "other"
 

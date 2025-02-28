@@ -14,8 +14,8 @@ from .agent import (
     run,
 )
 from .calendar_service import CalendarService
-from .models import Appointment, AppointmentStatus, Calendar
 from .config import DatabaseConfig
+from .models import Appointment, AppointmentStatus, Calendar
 
 
 async def setup_test_data(calendar_service, calendar_id):
@@ -192,9 +192,21 @@ async def main():
     logger.info("Starting Calendar Agent Chat Interface")
     print("Type 'exit' to quit")
     print("\nExample queries:")
-    print("- Schedule a client meeting today at 10 AM")
-    print("- Find me a 30-minute slot between 2 PM and 5 PM tomorrow")
-    print("- Need to show 456 Luxury Lane 9am-12pm today, high priority!!")
+    print(
+        "- Schedule a condo viewing at 123 Main St for tomorrow 2-3pm (Basic Appointment Scheduling)"
+    )
+    print(
+        "- Need to show 456 Luxury Lane today 3-5pm. This is high priority! (Priority Conflict Resolution)"
+    )
+    print(
+        "- Find me 3 available 1-hour slots for a client meeting today or tomorrow? (Propose Available Time Slots)"
+    )
+    print(
+        "- Which day next week is least busy so I can schedule some prospecting calls? (Identify Underutilized Days)"
+    )
+    print(
+        "- Could you help cancel this blocking marketing meeting? It is only an internal meeting (Context-Aware Appointment Management)"
+    )
     print()
 
     while True:
@@ -246,7 +258,7 @@ async def main():
                     print("\nSuggested time slots:")
                     for slot in result.data.suggested_slots:
                         print(
-                            f"- {slot.start_time.strftime('%Y-%m-%d %H:%M')} to {slot.end_time.strftime('%H:%M')}"
+                            f"- {slot.start_time} to {slot.end_time}"
                         )
 
                 if result.data.conflicts:
@@ -261,6 +273,10 @@ async def main():
 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
+            break
+        except EOFError:
+            # Handle EOF (end of file) when input is piped from another command
+            logger.info("EOF received, exiting")
             break
         except Exception as e:
             logger.error(f"Error processing request\n{e}")

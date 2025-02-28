@@ -3,6 +3,17 @@ from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+"""
+Calendar agent implementation.
+
+Note on timezone handling:
+- The calendar service internally works with UTC timezone
+- This agent layer is responsible for converting between UTC and local timezone for display
+- In this demo version, only the find_available_time_slots function has been updated with proper timezone conversion
+- Other functions may still display times in UTC
+- For production use, all time-related functions should be updated with proper timezone handling
+"""
+
 import logfire
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -154,7 +165,7 @@ def get_system_prompt(history: List[Message]) -> str:
 
     SUGGESTING AVAILABLE TIME SLOTS:
     - Use find_available_time_slots to suggest available time slots within a given range
-    - TIMESLOTS always start at 15 minute intervals (15, 30, 45, 60)
+    - TIMESLOTS always start at 30 minute intervals (00, 30)
 
     SUGGESTIONS FOR VARIOUS TIME SLOT RELATED QUERIES:
     - Use find_available_time_slots to find available time slots within a given range
@@ -283,57 +294,106 @@ async def find_available_time_slots(
             message="Calendar service not available",
         )
 
-    if calendar_id is None or start_time is None or end_time is None:
-        return CalendarResponse(
-            message="Missing required parameters: calendar_id, start_time, end_time",
-        )
+    # Get current date for default values
+    now = datetime.now(timezone.utc)
+    local_now = datetime.now().astimezone()  # Local time with timezone info
+    local_tz = local_now.tzinfo
+
+    # Default calendar_id if not provided
+    if calendar_id is None:
+        # Try to get the first calendar from the service
+        try:
+            calendar_id = 1  # Default to ID 1 if no specific ID provided
+        except Exception:
+            return CalendarResponse(
+                message="No calendar ID provided and couldn't determine default",
+            )
+
+    # Default time range (9am-5pm today) in local time, converted to UTC for processing
+    if start_time is None:
+        # Set default business hours (9am-5pm in local time)
+        local_start = local_now.replace(hour=9, minute=0, second=0, microsecond=0)
+        
+        # If current local time is after 9am, use current time as start
+        if local_now.hour >= 9:
+            local_start = local_now
+            
+        # Convert to UTC for internal processing
+        start_time = local_start.astimezone(timezone.utc)
+
+    if end_time is None:
+        local_end = local_now.replace(hour=17, minute=0, second=0, microsecond=0)
+        
+        # If current local time is after 5pm, use tomorrow
+        if local_now.hour >= 17:
+            local_start = (local_now + timedelta(days=1)).replace(
+                hour=9, minute=0, second=0, microsecond=0
+            )
+            local_end = (local_now + timedelta(days=1)).replace(
+                hour=17, minute=0, second=0, microsecond=0
+            )
+            
+            # Update start_time as well for the next day
+            start_time = local_start.astimezone(timezone.utc)
+            
+        # Convert to UTC for internal processing
+        end_time = local_end.astimezone(timezone.utc)
 
     try:
         # Use calendar_service directly
         calendar_service = ctx.deps.calendar_service
 
-        # Find available slots
-        current = start_time
+        # Find available slots using the service method
+        available_time_slots = calendar_service.find_available_slots(
+            calendar_id=calendar_id,
+            start_time=start_time,
+            end_time=end_time,
+            duration=duration,
+            max_slots=count,
+            priority=5,  # Default priority
+        )
+        
+        # Convert to TimeSlot objects with formatted times
         available_slots = []
-
-        # Business hours
-        business_start = time(9, 0)
-        business_end = time(17, 0)
-
-        # Helper function to check if time is within business hours
-        def is_within_business_hours(dt: datetime) -> bool:
-            t = dt.time()
-            return business_start <= t < business_end
-
-        while (
-            current + timedelta(minutes=duration) <= end_time
-            and len(available_slots) < count
-        ):
-            if is_within_business_hours(current):
-                is_available = calendar_service.is_time_slot_available(
-                    calendar_id,
-                    current,
-                    current + timedelta(minutes=duration),
+        for slot_start, slot_end in available_time_slots:
+            # Convert UTC times to local timezone for display
+            local_tz = datetime.now().astimezone().tzinfo
+            
+            # Ensure times are in UTC before converting to local
+            if slot_start.tzinfo != timezone.utc:
+                slot_start = slot_start.replace(tzinfo=timezone.utc)
+            if slot_end.tzinfo != timezone.utc:
+                slot_end = slot_end.replace(tzinfo=timezone.utc)
+                
+            # Convert to local timezone
+            local_start = slot_start.astimezone(local_tz)
+            local_end = slot_end.astimezone(local_tz)
+                
+            # Format times as strings without seconds
+            start_str = local_start.strftime("%Y-%m-%d %H:%M")
+            end_str = local_end.strftime("%Y-%m-%d %H:%M")
+            
+            available_slots.append(
+                TimeSlot(
+                    start_time=start_str,
+                    end_time=end_str,
+                    duration=duration,
                 )
-                if is_available:
-                    available_slots.append(
-                        TimeSlot(
-                            start_time=current.strftime("%Y-%m-%d %H:%M:%S"),
-                            end_time=(current + timedelta(minutes=duration)).strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
-                            duration=duration,
-                        )
-                    )
-            current += timedelta(minutes=30)  # Try every 30 minutes
+            )
 
+        # Add a note about time zone in the message
+        local_tz_name = datetime.now().astimezone().tzname()
+        message = f"Found {len(available_slots)} available time slots (all times in {local_tz_name})"
+        
         return CalendarResponse(
-            message=f"Found {len(available_slots)} available time slots",
+            message=message,
             suggested_slots=available_slots,
         )
     except Exception as e:
+        logger.error(f"Error finding available time slots: {e}")
         return CalendarResponse(
-            message=f"Error finding available time slots: {str(e)}",
+            message=f"Error finding available time slots: {e}",
+            error=str(e),
         )
 
 
