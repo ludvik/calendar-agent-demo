@@ -46,7 +46,7 @@ Based on the core user stories and following the principles of Occam's razor and
   - `calendar_id`: ID of the calendar
   - `date`: Date to check
 - **Returns**: Boolean indicating if day is underutilized
-- **Used in**: Identify Underutilized Days
+- **Used in**: Identify Underutilized **Days**
 
 ### 5. `get_appointments`
 - **Purpose**: Retrieve appointments within a time range
@@ -56,7 +56,7 @@ Based on the core user stories and following the principles of Occam's razor and
   - `end_time`: Optional end time for the search
   - `title_filter`: Optional title filter
   - `priority`: Optional priority filter
-- **Returns**: List of appointments matching the criteria
+- **Returns**: List of appointments matching the **criteria**
 - **Used in**: Priority Conflict Resolution, Basic Appointment Scheduling
 
 ### 6. `update_appointment`

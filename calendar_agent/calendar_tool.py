@@ -87,83 +87,83 @@ class CalendarTool:
     #
     #     return slots
 
-    def schedule_appointment(
-        self,
-        calendar_id: int,
-        title: str,
-        start_time: datetime,
-        end_time: datetime,
-        status: AppointmentStatus = AppointmentStatus.CONFIRMED,
-        priority: int = 3,
-        description: str = None,
-        location: str = None,
-    ) -> Tuple[bool, Optional[Dict], List[Dict]]:
-        """
-        Schedule a new appointment.
+    # def schedule_appointment(
+    #     self,
+    #     calendar_id: int,
+    #     title: str,
+    #     start_time: datetime,
+    #     end_time: datetime,
+    #     status: AppointmentStatus = AppointmentStatus.CONFIRMED,
+    #     priority: int = 3,
+    #     description: str = None,
+    #     location: str = None,
+    # ) -> Tuple[bool, Optional[Dict], List[Dict]]:
+    #     """
+    #     Schedule a new appointment.
 
-        Args:
-            calendar_id: ID of the calendar to schedule in
-            title: Title of the appointment
-            start_time: Start time
-            end_time: End time
-            status: Status of the appointment
-            priority: Priority of the appointment (1-5, lower is higher priority)
-            description: Optional description
-            location: Optional location
+    #     Args:
+    #         calendar_id: ID of the calendar to schedule in
+    #         title: Title of the appointment
+    #         start_time: Start time
+    #         end_time: End time
+    #         status: Status of the appointment
+    #         priority: Priority of the appointment (1-5, lower is higher priority)
+    #         description: Optional description
+    #         location: Optional location
 
-        Returns:
-            Tuple of (success, appointment_dict, conflicting_appointments)
-        """
-        try:
-            success, appointment, conflicts = (
-                self.calendar_service.schedule_appointment(
-                    calendar_id=calendar_id,
-                    title=title,
-                    start_time=start_time,
-                    end_time=end_time,
-                    status=status,
-                    priority=priority,
-                    description=description,
-                    location=location,
-                )
-            )
+    #     Returns:
+    #         Tuple of (success, appointment_dict, conflicting_appointments)
+    #     """
+    #     try:
+    #         success, appointment, conflicts = (
+    #             self.calendar_service.schedule_appointment(
+    #                 calendar_id=calendar_id,
+    #                 title=title,
+    #                 start_time=start_time,
+    #                 end_time=end_time,
+    #                 status=status,
+    #                 priority=priority,
+    #                 description=description,
+    #                 location=location,
+    #             )
+    #         )
 
-            if success and appointment:
-                # Convert to dict for the agent
-                appointment_dict = {
-                    "id": appointment.id,
-                    "title": appointment.title,
-                    "start_time": appointment.start_time.isoformat(),
-                    "end_time": appointment.end_time.isoformat(),
-                    "status": appointment.status.value,
-                    "priority": appointment.priority,
-                    "description": appointment.description,
-                    "location": appointment.location,
-                    "type": self.get_appointment_type(appointment),
-                }
+    #         if success and appointment:
+    #             # Convert to dict for the agent
+    #             appointment_dict = {
+    #                 "id": appointment.id,
+    #                 "title": appointment.title,
+    #                 "start_time": appointment.start_time.isoformat(),
+    #                 "end_time": appointment.end_time.isoformat(),
+    #                 "status": appointment.status.value,
+    #                 "priority": appointment.priority,
+    #                 "description": appointment.description,
+    #                 "location": appointment.location,
+    #                 "type": self.get_appointment_type(appointment),
+    #             }
 
-                # Convert conflicting appointments to dict
-                conflicts_dict = []
-                for appt in conflicts:
-                    conflicts_dict.append(
-                        {
-                            "id": appt.id,
-                            "title": appt.title,
-                            "start_time": appt.start_time.isoformat(),
-                            "end_time": appt.end_time.isoformat(),
-                            "status": appt.status.value,
-                            "priority": appt.priority,
-                            "description": appt.description,
-                            "location": appt.location,
-                            "type": self.get_appointment_type(appt),
-                        }
-                    )
+    #             # Convert conflicting appointments to dict
+    #             conflicts_dict = []
+    #             for appt in conflicts:
+    #                 conflicts_dict.append(
+    #                     {
+    #                         "id": appt.id,
+    #                         "title": appt.title,
+    #                         "start_time": appt.start_time.isoformat(),
+    #                         "end_time": appt.end_time.isoformat(),
+    #                         "status": appt.status.value,
+    #                         "priority": appt.priority,
+    #                         "description": appt.description,
+    #                         "location": appt.location,
+    #                         "type": self.get_appointment_type(appt),
+    #                     }
+    #                 )
 
-                return success, appointment_dict, conflicts_dict
-            return success, None, []
-        except Exception as e:
-            print(f"Error in CalendarTool.schedule_appointment: {e}")
-            return False, None, []
+    #             return success, appointment_dict, conflicts_dict
+    #         return success, None, []
+    #     except Exception as e:
+    #         print(f"Error in CalendarTool.schedule_appointment: {e}")
+    #         return False, None, []
 
     def get_appointment_type(self, appointment):
         """
@@ -402,57 +402,57 @@ class CalendarTool:
             print(f"Error in CalendarTool.update_appointment: {e}")
             return False, None, []
 
-    def check_day_availability(
-        self, calendar_id: int, date: datetime
-    ) -> CalendarResponse:
-        """Check availability for a given day.
-
-        Args:
-            calendar_id: ID of the calendar to check
-            date: The date to check
-
-        Returns:
-            CalendarResponse with availability information
-        """
-        # Get all appointments for the day
-        start_time = datetime.combine(date.date(), self.business_start)
-        end_time = datetime.combine(date.date(), self.business_end)
-        success, appointments = self.calendar_service.get_appointments_in_range(
-            start_time=start_time,
-            end_time=end_time,
-            calendar_id=calendar_id,
-        )
-
-        if not success:
-            return CalendarResponse(
-                type="CALENDAR",
-                message="Failed to retrieve appointments.",
-                action_taken="Failed: Could not get appointments",
-                suggested_slots=None,
-            )
-
-        # Build list of busy slots
-        busy_slots = []
-        for appt in appointments:
-            busy_slots.append(
-                {"start": appt.start_time, "end": appt.end_time, "title": appt.title}
-            )
-
-        # Format message
-        if not busy_slots:
-            message = f"The entire day from {self.business_start} to {self.business_end} is available."
-            action_taken = "Found: Day is completely free"
-        else:
-            busy_times = [
-                f"{slot['start'].strftime('%I:%M %p')} - {slot['end'].strftime('%I:%M %p')}: {slot['title']}"
-                for slot in busy_slots
-            ]
-            message = f"Busy times:\n" + "\n".join(busy_times)
-            action_taken = f"Found {len(busy_slots)} appointments"
-
-        return CalendarResponse(
-            type="CALENDAR",
-            message=message,
-            action_taken=action_taken,
-            suggested_slots=None,
-        )
+    # def check_day_availability(
+    #     self, calendar_id: int, date: datetime
+    # ) -> CalendarResponse:
+    #     """Check availability for a given day.
+    #
+    #     Args:
+    #         calendar_id: ID of the calendar to check
+    #         date: The date to check
+    #
+    #     Returns:
+    #         CalendarResponse with availability information
+    #     """
+    #     # Get all appointments for the day
+    #     start_time = datetime.combine(date.date(), self.business_start)
+    #     end_time = datetime.combine(date.date(), self.business_end)
+    #     success, appointments = self.calendar_service.get_appointments_in_range(
+    #         start_time=start_time,
+    #         end_time=end_time,
+    #         calendar_id=calendar_id,
+    #     )
+    #
+    #     if not success:
+    #         return CalendarResponse(
+    #             type="CALENDAR",
+    #             message="Failed to retrieve appointments.",
+    #             action_taken="Failed: Could not get appointments",
+    #             suggested_slots=None,
+    #         )
+    #
+    #     # Build list of busy slots
+    #     busy_slots = []
+    #     for appt in appointments:
+    #         busy_slots.append(
+    #             {"start": appt.start_time, "end": appt.end_time, "title": appt.title}
+    #         )
+    #
+    #     # Format message
+    #     if not busy_slots:
+    #         message = f"The entire day from {self.business_start} to {self.business_end} is available."
+    #         action_taken = "Found: Day is completely free"
+    #     else:
+    #         busy_times = [
+    #             f"{slot['start'].strftime('%I:%M %p')} - {slot['end'].strftime('%I:%M %p')}: {slot['title']}"
+    #             for slot in busy_slots
+    #         ]
+    #         message = f"Busy times:\n" + "\n".join(busy_times)
+    #         action_taken = f"Found {len(busy_slots)} appointments"
+    #
+    #     return CalendarResponse(
+    #         type="CALENDAR",
+    #         message=message,
+    #         action_taken=action_taken,
+    #         suggested_slots=None,
+    #     )
