@@ -11,12 +11,11 @@ from .agent import (
     calendar_agent,
     get_conversation_context,
     get_system_prompt,
-    run_with_calendar,
+    run,
 )
 from .calendar_service import CalendarService
-from .calendar_tool import AppointmentStatus, CalendarTool
+from .models import Appointment, AppointmentStatus, Calendar
 from .config import DatabaseConfig
-from .models import Appointment, Calendar
 
 
 async def setup_test_data(calendar_service, calendar_id):
@@ -166,10 +165,8 @@ async def main():
 
     print("\n===== END TEST DATA =====\n")
 
-    # Initialize calendar tool and set active calendar
-    calendar = CalendarTool(calendar_service)
-    calendar.set_active_calendar(calendar_id)
-    logger.info(f"Set active calendar to {calendar_id}")
+    # Initialize calendar service
+    logger.info(f"Using calendar ID: {calendar_id}")
 
     # Initialize agent dependencies with a persistent conversation history
     conversation_history = []  # Store conversation history
@@ -188,7 +185,7 @@ async def main():
 
     # Create dependencies with the persistent context
     deps = CalendarDependencies(
-        calendar=calendar,
+        calendar_service=calendar_service,
         conversation_history=conversation_history,
     )
 
@@ -229,11 +226,10 @@ async def main():
             # Process with the agent
             logger.debug(f"Processing user input: {user_input}")
 
-            result = await run_with_calendar(
-                prompt=user_input,
+            result = await run(
+                user_prompt=user_input,
                 history=conversation_history,
                 calendar_service=calendar_service,
-                calendar_id=calendar_id,
             )
 
             # Add assistant response to history

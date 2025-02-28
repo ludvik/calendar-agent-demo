@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, models
 
 from .calendar_service import CalendarService
-from .models import Appointment, AppointmentStatus
 from .config import config
+from .models import Appointment, AppointmentStatus
 from .response import BaseResponse, CalendarResponse, ResponseType, TimeSlot
 
 
@@ -120,6 +120,13 @@ def get_system_prompt(history: List[Message]) -> str:
        * If successful with conflicts: Inform the user of the successful scheduling and mention the conflicts
        * If unsuccessful: Explain why and suggest alternatives
 
+    DATETIME HANDLING:
+    - All datetime values must be in UTC timezone
+    - When receiving datetime strings, convert them to datetime objects using datetime.fromisoformat()
+    - Always replace 'Z' in ISO format strings with '+00:00' for proper timezone parsing
+    - Use the ensure_utc() function to guarantee timezone awareness
+    - SQLite has limitations with timezone storage - all retrieved datetimes should be treated as UTC
+
     CONTEXT MANAGEMENT:
     - Use appointment IDs when modifying or resolving conflicts
     - NEVER create new appointments when user refers to existing ones
@@ -128,17 +135,24 @@ def get_system_prompt(history: List[Message]) -> str:
       * Cancellation: cancel_appointment
     
     RESPONSE FORMATTING:
-    - For simple interactions: Return BaseResponse with type="base" and a message
-      Example: {{"type": "base", "message": "Hello! How can I help you today?"}}
-    
-    - For calendar operations: Use CalendarResponse with type="calendar" including:
+    - For calendar operations: Use CalendarResponse with type="CALENDAR" including:
       * Natural language message describing the action
       * Specific action taken
       * Relevant appointment details (title, date, time, duration)
       * For availability checks: whether time is available or what's blocking it
       * For time slot suggestions: list of available slots in clear format
 
-    SUGGESTING n AVAILABLE TIME SLOTS:
+    AVAILABLE TOOLS:
+    1. schedule_appointment - Create a new appointment with title, start_time, duration, priority, etc.
+    2. check_availability - Check if a specific time slot is available
+    3. find_available_time_slots - Find multiple available time slots within a date range
+    4. check_day_availability - Check if a specific day has significant free time
+    5. get_appointments - Retrieve appointments within a time range with optional filtering
+    6. cancel_appointment - Cancel an existing appointment by ID
+    7. batch_update - Update multiple appointments in a single operation
+    8. get_appointment - Get details of a specific appointment by ID
+
+    SUGGESTING AVAILABLE TIME SLOTS:
     - Use find_available_time_slots to suggest available time slots within a given range
     - TIMESLOTS always start at 15 minute intervals (15, 30, 45, 60)
 
@@ -156,8 +170,8 @@ def get_system_prompt(history: List[Message]) -> str:
     
     - batch_update accepts a list of update operations, each containing:
       * appointment_id: ID of the appointment to update (required)
-      * start_time: New start time (optional)
-      * end_time: New end time (optional)
+      * start_time: New start time (optional) - must be a datetime object or ISO format string
+      * end_time: New end time (optional) - must be a datetime object or ISO format string
       * status: New status (CONFIRMED, TENTATIVE, CANCELLED) (optional)
       * priority: New priority (1-5, where 1 is highest) (optional)
       * title: New title (optional)
@@ -166,7 +180,7 @@ def get_system_prompt(history: List[Message]) -> str:
     
     - Example usage:
       batch_update([
-        {{"appointment_id": 1, "start_time": "2025-03-01T10:00:00", "end_time": "2025-03-01T11:00:00"}},
+        {{"appointment_id": 1, "start_time": "2025-03-01T10:00:00Z", "end_time": "2025-03-01T11:00:00Z"}},
         {{"appointment_id": 2, "status": "CANCELLED"}},
         {{"appointment_id": 3, "priority": 1, "location": "Main Office"}}
       ])
@@ -176,9 +190,8 @@ def get_system_prompt(history: List[Message]) -> str:
       * Not providing specific appointment IDs when updating or cancelling
       * Suggesting complex rescheduling without checking availability
       * Forgetting to provide detailed appointment information when querying
-
-    - When updating appointments, use the batch_update function with the appointment ID:
-      Example: batch_update([{{"appointment_id": 123, "title": "New Title", "start_time": "2025-03-01T10:00:00"}}])
+      * Using naive datetime objects without timezone information
+      * Not handling string-to-datetime conversion properly
 
     Remember to verify operations, check for conflicts after each action, and maintain conversation continuity.
     """
@@ -232,9 +245,7 @@ async def check_availability(
 
     # Check availability directly using the calendar service
     is_available = ctx.deps.calendar_service.check_availability(
-        calendar_id=calendar_id, 
-        start_time=time, 
-        end_time=end_time
+        calendar_id=calendar_id, start_time=time, end_time=end_time
     )
 
     # Format response
@@ -271,30 +282,33 @@ async def find_available_time_slots(
         return CalendarResponse(
             message="Calendar service not available",
         )
-    
+
     if calendar_id is None or start_time is None or end_time is None:
         return CalendarResponse(
             message="Missing required parameters: calendar_id, start_time, end_time",
         )
-    
+
     try:
         # Use calendar_service directly
         calendar_service = ctx.deps.calendar_service
-        
+
         # Find available slots
         current = start_time
         available_slots = []
-        
+
         # Business hours
         business_start = time(9, 0)
         business_end = time(17, 0)
-        
+
         # Helper function to check if time is within business hours
         def is_within_business_hours(dt: datetime) -> bool:
             t = dt.time()
             return business_start <= t < business_end
-        
-        while current + timedelta(minutes=duration) <= end_time and len(available_slots) < count:
+
+        while (
+            current + timedelta(minutes=duration) <= end_time
+            and len(available_slots) < count
+        ):
             if is_within_business_hours(current):
                 is_available = calendar_service.is_time_slot_available(
                     calendar_id,
@@ -305,12 +319,14 @@ async def find_available_time_slots(
                     available_slots.append(
                         TimeSlot(
                             start_time=current.strftime("%Y-%m-%d %H:%M:%S"),
-                            end_time=(current + timedelta(minutes=duration)).strftime("%Y-%m-%d %H:%M:%S"),
-                            duration=duration
+                            end_time=(current + timedelta(minutes=duration)).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            duration=duration,
                         )
                     )
             current += timedelta(minutes=30)  # Try every 30 minutes
-        
+
         return CalendarResponse(
             message=f"Found {len(available_slots)} available time slots",
             suggested_slots=available_slots,
@@ -330,15 +346,15 @@ async def check_day_availability(
         return CalendarResponse(
             message="Calendar service not available",
         )
-    
+
     try:
         # Use calendar_service directly
         calendar_service = ctx.deps.calendar_service
-        
+
         # Business hours
         business_start = time(9, 0)
         business_end = time(17, 0)
-        
+
         # Get all appointments for the day
         start_time = datetime.combine(date.date(), business_start)
         end_time = datetime.combine(date.date(), business_end)
@@ -347,23 +363,25 @@ async def check_day_availability(
             start_time=start_time,
             end_time=end_time,
         )
-        
+
         if not success:
             return CalendarResponse(
                 message="Failed to retrieve appointments.",
                 action_taken="Failed: Could not get appointments",
             )
-        
+
         # Build list of busy slots
         busy_slots = []
         for appt in appointments:
             busy_slots.append(
                 {"start": appt.start_time, "end": appt.end_time, "title": appt.title}
             )
-        
+
         # Format message
         if not busy_slots:
-            message = f"The entire day from {business_start} to {business_end} is available."
+            message = (
+                f"The entire day from {business_start} to {business_end} is available."
+            )
             action_taken = "Found: Day is completely free"
         else:
             busy_times = [
@@ -372,7 +390,7 @@ async def check_day_availability(
             ]
             message = f"Busy times:\n" + "\n".join(busy_times)
             action_taken = f"Found {len(busy_slots)} appointments"
-        
+
         return CalendarResponse(
             message=message,
             action_taken=action_taken,
@@ -444,7 +462,9 @@ async def schedule_appointment(
     if success:
         # Format the response with a clear time format
         formatted_date = start_time.strftime("%B %d")
-        formatted_time = start_time.strftime("%I:%M %p").lstrip("0")  # Remove leading zero
+        formatted_time = start_time.strftime("%I:%M %p").lstrip(
+            "0"
+        )  # Remove leading zero
         formatted_duration = f"{duration} minutes" if duration != 60 else "1 hour"
 
         # Convert appointment to dict for the response
@@ -521,59 +541,61 @@ async def get_appointments(
     try:
         # Get the calendar service from dependencies
         calendar_service = ctx.deps.calendar_service
-        
+
         # Set default time range if not provided
         if not start_time:
-            start_time = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_time = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
         if not end_time:
             end_time = datetime.now(timezone.utc) + timedelta(days=7)
-            
+
         # Get appointments in range
         success, appointments = calendar_service.get_appointments_in_range(
             calendar_id=calendar_id,
             start_time=start_time,
             end_time=end_time,
         )
-        
+
         if not success or not appointments:
             time_range_msg = ""
             if start_time and end_time:
                 time_range_msg = f" between {start_time.strftime('%Y-%m-%d')} and {end_time.strftime('%Y-%m-%d')}"
-            
+
             return CalendarResponse(
                 type="CALENDAR",
                 message=f"No appointments found{time_range_msg}.",
                 action_taken="No appointments found",
             )
-            
+
         # Apply filters
         filtered_appointments = []
         for appointment in appointments:
             # Skip cancelled appointments
             if appointment.status == AppointmentStatus.CANCELLED:
                 continue
-                
+
             # Apply title filter if specified
             if title_filter and title_filter.lower() not in appointment.title.lower():
                 continue
-                
+
             # Apply priority filter if specified
             if priority is not None and appointment.priority != priority:
                 continue
-                
+
             filtered_appointments.append(appointment)
-            
+
         # Format appointment details for better readability
         formatted_appointments = []
         for appt in filtered_appointments:
             start_time_str = appt.start_time.strftime("%I:%M %p").lstrip("0")
             end_time_str = appt.end_time.strftime("%I:%M %p").lstrip("0")
             formatted_date = appt.start_time.strftime("%B %d")
-            
+
             formatted_appointments.append(
                 f"{appt.title} on {formatted_date} from {start_time_str} to {end_time_str} (Priority: {appt.priority}, ID: {appt.id})"
             )
-            
+
         if title_filter:
             if filtered_appointments:
                 details = "\n- " + "\n- ".join(formatted_appointments)
@@ -598,7 +620,7 @@ async def get_appointments(
                     time_range_msg = f" for {start_date}"
                 else:
                     time_range_msg = f" between {start_date} and {end_date}"
-                    
+
             return CalendarResponse(
                 type="CALENDAR",
                 message=f"Found {len(filtered_appointments)} appointments{time_range_msg}:{details}",
@@ -608,7 +630,7 @@ async def get_appointments(
             time_range_msg = ""
             if start_time and end_time:
                 time_range_msg = f" between {start_time.strftime('%Y-%m-%d')} and {end_time.strftime('%Y-%m-%d')}"
-                
+
             return CalendarResponse(
                 type="CALENDAR",
                 message=f"No appointments found{time_range_msg}.",
@@ -631,33 +653,35 @@ async def cancel_appointment(
     try:
         # Get the calendar service from dependencies
         calendar_service = ctx.deps.calendar_service
-        
+
         # Get the appointment before cancelling to include in the response
         with calendar_service.session_factory() as session:
-            appointment = session.query(Appointment).filter_by(
-                id=appointment_id, calendar_id=calendar_id
-            ).first()
-            
+            appointment = (
+                session.query(Appointment)
+                .filter_by(id=appointment_id, calendar_id=calendar_id)
+                .first()
+            )
+
             if not appointment:
                 return CalendarResponse(
                     type="CALENDAR",
                     message=f"Failed to cancel appointment {appointment_id}: Appointment not found.",
                     action_taken="Failed: Appointment not found",
                 )
-            
+
             # Store appointment details before cancelling
             appointment_title = appointment.title
             appointment_start = appointment.start_time
-            
+
             # Cancel the appointment
             appointment.status = AppointmentStatus.CANCELLED
             appointment.updated_at = datetime.now(timezone.utc)
             session.commit()
-            
+
             # Format the response
             formatted_date = appointment_start.strftime("%B %d")
             formatted_time = appointment_start.strftime("%I:%M %p").lstrip("0")
-            
+
             return CalendarResponse(
                 type="CALENDAR",
                 message=f"Successfully cancelled appointment '{appointment_title}' scheduled for {formatted_date} at {formatted_time}.",
@@ -724,6 +748,31 @@ async def batch_update(
         description = update.get("description")
         location = update.get("location")
 
+        # Convert string dates to datetime objects if needed
+        if isinstance(start_time, str):
+            try:
+                start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            except ValueError:
+                failed_updates.append(
+                    {
+                        "error": f"Invalid start_time format: {start_time}",
+                        "appointment_id": appointment_id,
+                    }
+                )
+                continue
+
+        if isinstance(end_time, str):
+            try:
+                end_time = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            except ValueError:
+                failed_updates.append(
+                    {
+                        "error": f"Invalid end_time format: {end_time}",
+                        "appointment_id": appointment_id,
+                    }
+                )
+                continue
+
         # Convert status string to enum if provided
         status = None
         if status_str:
@@ -740,16 +789,18 @@ async def batch_update(
 
         # Perform the update directly using calendar_service
         try:
-            success, updated_appointment, conflicts = calendar_service.update_appointment(
-                calendar_id=calendar_id,
-                appointment_id=appointment_id,
-                title=title,
-                start_time=start_time,
-                end_time=end_time,
-                status=status,
-                priority=priority,
-                description=description,
-                location=location,
+            success, updated_appointment, conflicts = (
+                calendar_service.update_appointment(
+                    calendar_id=calendar_id,
+                    appointment_id=appointment_id,
+                    title=title,
+                    start_time=start_time,
+                    end_time=end_time,
+                    status=status,
+                    priority=priority,
+                    description=description,
+                    location=location,
+                )
             )
 
             if success and updated_appointment:
