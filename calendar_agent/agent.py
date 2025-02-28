@@ -328,9 +328,63 @@ async def find_available_time_slots(
 @calendar_agent.tool
 async def check_day_availability(
     ctx: RunContext[CalendarDependencies], calendar_id: int, date: datetime
-) -> bool:
+) -> CalendarResponse:
     """Check if a specific day has significant free time"""
-    return ctx.deps.calendar.check_day_availability(calendar_id, date)
+    if not ctx or not ctx.deps or not ctx.deps.calendar_service:
+        return CalendarResponse(
+            message="Calendar service not available",
+        )
+    
+    try:
+        # Use calendar_service directly
+        calendar_service = ctx.deps.calendar_service
+        
+        # Business hours
+        business_start = time(9, 0)
+        business_end = time(17, 0)
+        
+        # Get all appointments for the day
+        start_time = datetime.combine(date.date(), business_start)
+        end_time = datetime.combine(date.date(), business_end)
+        success, appointments = calendar_service.get_appointments_in_range(
+            start_time=start_time,
+            end_time=end_time,
+            calendar_id=calendar_id,
+        )
+        
+        if not success:
+            return CalendarResponse(
+                message="Failed to retrieve appointments.",
+                action_taken="Failed: Could not get appointments",
+            )
+        
+        # Build list of busy slots
+        busy_slots = []
+        for appt in appointments:
+            busy_slots.append(
+                {"start": appt.start_time, "end": appt.end_time, "title": appt.title}
+            )
+        
+        # Format message
+        if not busy_slots:
+            message = f"The entire day from {business_start} to {business_end} is available."
+            action_taken = "Found: Day is completely free"
+        else:
+            busy_times = [
+                f"{slot['start'].strftime('%I:%M %p')} - {slot['end'].strftime('%I:%M %p')}: {slot['title']}"
+                for slot in busy_slots
+            ]
+            message = f"Busy times:\n" + "\n".join(busy_times)
+            action_taken = f"Found {len(busy_slots)} appointments"
+        
+        return CalendarResponse(
+            message=message,
+            action_taken=action_taken,
+        )
+    except Exception as e:
+        return CalendarResponse(
+            message=f"Error checking day availability: {str(e)}",
+        )
 
 
 @calendar_agent.tool

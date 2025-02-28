@@ -57,7 +57,7 @@ class CalendarTool:
     #     count: int = 3,
     # ) -> List[TimeSlot]:
     #     """Find available time slots in a given range.
-    # 
+    #
     #     Args:
     #         calendar_id: ID of the calendar to check
     #         start_time: Start of the range to search
@@ -67,7 +67,7 @@ class CalendarTool:
     #     """
     #     current = start_time
     #     slots = []
-    # 
+    #
     #     while current + timedelta(minutes=duration) <= end_time and len(slots) < count:
     #         if self.is_within_business_hours(current):
     #             is_available = self.calendar_service.is_time_slot_available(
@@ -84,7 +84,7 @@ class CalendarTool:
     #                     )
     #                 )
     #         current += timedelta(minutes=30)  # Try every 30 minutes
-    # 
+    #
     #     return slots
 
     def schedule_appointment(

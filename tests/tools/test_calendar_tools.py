@@ -1,6 +1,6 @@
 """Tests for calendar tools."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +13,7 @@ from calendar_agent.agent import (
     CalendarResponse,
     Message,
     check_availability,
+    check_day_availability,
     find_available_time_slots,
     schedule_appointment,
 )
@@ -431,3 +432,82 @@ async def test_find_available_time_slots_missing_params(mock_run_context):
     # Verify the result using the correct CalendarResponse properties
     assert "Missing required parameters" in result.message
     assert result.suggested_slots is None
+
+
+@pytest.mark.asyncio
+async def test_check_day_availability_free(mock_run_context, test_calendar, calendar_service):
+    """Test check_day_availability when the day is completely free."""
+    # Get the test calendar
+    calendar = test_calendar
+
+    # Use tomorrow's date to avoid conflicts with other tests
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    
+    # Call the function
+    result = await find_available_time_slots(
+        mock_run_context,
+        calendar_id=calendar.id,
+        start_time=tomorrow,
+        end_time=tomorrow + timedelta(hours=8),
+        duration=30,
+    )
+    
+    # Call the check_day_availability function
+    response = await check_day_availability(
+        mock_run_context,
+        calendar_id=calendar.id,
+        date=tomorrow,
+    )
+    
+    # Verify the response
+    assert response.message.startswith("The entire day from")
+    assert "is available" in response.message
+    assert response.action_taken == "Found: Day is completely free"
+    assert response.suggested_slots is None
+
+
+@pytest.mark.asyncio
+async def test_check_day_availability_with_appointments(mock_run_context, test_calendar, calendar_service):
+    """Test check_day_availability when there are appointments on the day."""
+    # Get the test calendar
+    calendar = test_calendar
+
+    # Use day after tomorrow to avoid conflicts with other tests
+    day_after_tomorrow = datetime.now(timezone.utc) + timedelta(days=2)
+    
+    # Create a test appointment
+    start_time = datetime.combine(day_after_tomorrow.date(), time(10, 0)).replace(tzinfo=timezone.utc)
+    end_time = datetime.combine(day_after_tomorrow.date(), time(11, 0)).replace(tzinfo=timezone.utc)
+    
+    # Schedule an appointment
+    appointment = Appointment(
+        calendar_id=calendar.id,
+        title="Test Appointment",
+        start_time=start_time,
+        end_time=end_time,
+        status=AppointmentStatus.CONFIRMED,
+        priority=1,
+    )
+    
+    # Use session_factory() with a context manager as done in other tests
+    with calendar_service.session_factory() as session:
+        session.add(appointment)
+        session.commit()
+    
+    # Call the check_day_availability function
+    response = await check_day_availability(
+        mock_run_context,
+        calendar_id=calendar.id,
+        date=day_after_tomorrow,
+    )
+    
+    # Verify the response
+    assert "Busy times" in response.message
+    assert "Test Appointment" in response.message
+    assert response.action_taken == "Found 1 appointments"
+    assert response.suggested_slots is None
+    
+    # Clean up
+    with calendar_service.session_factory() as session:
+        session.delete(appointment)
+        session.commit()
