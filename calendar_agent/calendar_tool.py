@@ -294,113 +294,113 @@ class CalendarTool:
         """
         return self.calendar_service.cancel_appointment(calendar_id, appointment_id)
 
-    def update_appointment(
-        self,
-        calendar_id: int,
-        appointment_id: int,
-        title: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        status: Optional[AppointmentStatus] = None,
-        priority: Optional[int] = None,
-        description: Optional[str] = None,
-        location: Optional[str] = None,
-    ) -> Tuple[bool, Optional[dict], List[dict]]:
-        """
-        Update an existing appointment.
+    # def update_appointment(
+    #     self,
+    #     calendar_id: int,
+    #     appointment_id: int,
+    #     title: Optional[str] = None,
+    #     start_time: Optional[datetime] = None,
+    #     end_time: Optional[datetime] = None,
+    #     status: Optional[AppointmentStatus] = None,
+    #     priority: Optional[int] = None,
+    #     description: Optional[str] = None,
+    #     location: Optional[str] = None,
+    # ) -> Tuple[bool, Optional[dict], List[dict]]:
+    #     """
+    #     Update an existing appointment.
 
-        Args:
-            calendar_id: ID of the calendar to update in
-            appointment_id: ID of the appointment to update
-            title: New title (optional)
-            start_time: New start time (optional)
-            end_time: New end time (optional)
-            status: New status (optional)
-            priority: New priority (optional)
-            description: New description (optional)
-            location: New location (optional)
+    #     Args:
+    #         calendar_id: ID of the calendar to update in
+    #         appointment_id: ID of the appointment to update
+    #         title: New title (optional)
+    #         start_time: New start time (optional)
+    #         end_time: New end time (optional)
+    #         status: New status (optional)
+    #         priority: New priority (optional)
+    #         description: New description (optional)
+    #         location: New location (optional)
 
-        Returns:
-            Tuple of (success, updated_appointment_dict, conflicting_appointments_dicts)
-        """
-        try:
-            # Call the calendar service's update_appointment method
-            success, updated_appointment, conflicts = (
-                self.calendar_service.update_appointment(
-                    calendar_id=calendar_id,
-                    appointment_id=appointment_id,
-                    title=title,
-                    start_time=start_time,
-                    end_time=end_time,
-                    status=status,
-                    priority=priority,
-                    description=description,
-                    location=location,
-                )
-            )
+    #     Returns:
+    #         Tuple of (success, updated_appointment_dict, conflicting_appointments_dicts)
+    #     """
+    #     try:
+    #         # Call the calendar service's update_appointment method
+    #         success, updated_appointment, conflicts = (
+    #             self.calendar_service.update_appointment(
+    #                 calendar_id=calendar_id,
+    #                 appointment_id=appointment_id,
+    #                 title=title,
+    #                 start_time=start_time,
+    #                 end_time=end_time,
+    #                 status=status,
+    #                 priority=priority,
+    #                 description=description,
+    #                 location=location,
+    #             )
+    #         )
 
-            if not success or not updated_appointment:
-                return False, None, []
+    #         if not success or not updated_appointment:
+    #             return False, None, []
 
-            # Immediately convert appointment to dictionary to avoid detached object issues
-            try:
-                updated_dict = {
-                    "id": updated_appointment.id,
-                    "title": updated_appointment.title,
-                    "start_time": (
-                        updated_appointment.start_time.isoformat()
-                        if updated_appointment.start_time
-                        else None
-                    ),
-                    "end_time": (
-                        updated_appointment.end_time.isoformat()
-                        if updated_appointment.end_time
-                        else None
-                    ),
-                    "status": (
-                        updated_appointment.status.value
-                        if updated_appointment.status
-                        else None
-                    ),
-                    "priority": updated_appointment.priority,
-                    "description": updated_appointment.description,
-                    "location": updated_appointment.location,
-                    "type": self.get_appointment_type(updated_appointment),
-                }
-            except Exception as e:
-                print(f"Error converting updated appointment to dict: {e}")
-                return False, None, []
+    #         # Immediately convert appointment to dictionary to avoid detached object issues
+    #         try:
+    #             updated_dict = {
+    #                 "id": updated_appointment.id,
+    #                 "title": updated_appointment.title,
+    #                 "start_time": (
+    #                     updated_appointment.start_time.isoformat()
+    #                     if updated_appointment.start_time
+    #                     else None
+    #                 ),
+    #                 "end_time": (
+    #                     updated_appointment.end_time.isoformat()
+    #                     if updated_appointment.end_time
+    #                     else None
+    #                 ),
+    #                 "status": (
+    #                     updated_appointment.status.value
+    #                     if updated_appointment.status
+    #                     else None
+    #                 ),
+    #                 "priority": updated_appointment.priority,
+    #                 "description": updated_appointment.description,
+    #                 "location": updated_appointment.location,
+    #                 "type": self.get_appointment_type(updated_appointment),
+    #             }
+    #         except Exception as e:
+    #             print(f"Error converting updated appointment to dict: {e}")
+    #             return False, None, []
 
-            # Immediately convert conflicts to dictionaries to avoid detached object issues
-            conflict_dicts = []
-            try:
-                for conflict in conflicts:
-                    conflict_dict = {
-                        "id": conflict.id,
-                        "title": conflict.title,
-                        "start_time": (
-                            conflict.start_time.isoformat()
-                            if conflict.start_time
-                            else None
-                        ),
-                        "end_time": (
-                            conflict.end_time.isoformat() if conflict.end_time else None
-                        ),
-                        "status": conflict.status.value if conflict.status else None,
-                        "priority": conflict.priority,
-                        "description": conflict.description,
-                        "location": conflict.location,
-                        "type": self.get_appointment_type(conflict),
-                    }
-                    conflict_dicts.append(conflict_dict)
-            except Exception as e:
-                print(f"Error converting conflict to dict: {e}")
-                # Continue with what we have
+    #         # Immediately convert conflicts to dictionaries to avoid detached object issues
+    #         conflict_dicts = []
+    #         try:
+    #             for conflict in conflicts:
+    #                 conflict_dict = {
+    #                     "id": conflict.id,
+    #                     "title": conflict.title,
+    #                     "start_time": (
+    #                         conflict.start_time.isoformat()
+    #                         if conflict.start_time
+    #                         else None
+    #                     ),
+    #                     "end_time": (
+    #                         conflict.end_time.isoformat() if conflict.end_time else None
+    #                     ),
+    #                     "status": conflict.status.value if conflict.status else None,
+    #                     "priority": conflict.priority,
+    #                     "description": conflict.description,
+    #                     "location": conflict.location,
+    #                     "type": self.get_appointment_type(conflict),
+    #                 }
+    #                 conflict_dicts.append(conflict_dict)
+    #         except Exception as e:
+    #             print(f"Error converting conflict to dict: {e}")
+    #             # Continue with what we have
 
-            return success, updated_dict, conflict_dicts
-        except Exception as e:
-            print(f"Error in CalendarTool.update_appointment: {e}")
-            return False, None, []
+    #         return success, updated_dict, conflict_dicts
+    #     except Exception as e:
+    #         print(f"Error in CalendarTool.update_appointment: {e}")
+    #         return False, None, []
 
     # def check_day_availability(
     #     self, calendar_id: int, date: datetime

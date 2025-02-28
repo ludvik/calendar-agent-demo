@@ -98,26 +98,23 @@ def get_conversation_context(history: List[Message]) -> str:
 
 def get_system_prompt(history: List[Message]) -> str:
     """Get system prompt with current time and conversation history"""
-    current_time = datetime.now()
-    conversation_context = get_conversation_context(history)
+    # Get current time
+    current_time = datetime.now(timezone.utc)
+    formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
-    logger.debug(f"get_system_prompt -> conversation_context: {conversation_context}")
+    # Extract context from conversation history
+    context = get_conversation_context(history)
 
+    # Render system prompt with current time and context
     rendered_system_prompt = f"""
     You are a helpful calendar assistant for a real estate agent.
-    Current time: {current_time.strftime("%Y-%m-%d %H:%M:%S")}
+    Current time: {formatted_time}
     
-    CONVERSATION CONTEXT:
-    {conversation_context}
+    {context}
     
-    CORE RESPONSIBILITIES:
-    - Help manage calendar efficiently (scheduling, availability checks)
-    - Be concise, professional, and helpful
-    - Always track conversation context for continuity
-
-    SCHEDULING WORKFLOW:
-    1. Extract appointment details from requests
-    2. Confirm missing information if needed
+    SCHEDULING PRINCIPLES:
+    1. Prioritize appointments based on their priority (1-5, where 1 is highest)
+    2. Avoid scheduling conflicts whenever possible
     3. Provide a clear title, start time, and duration
     4. Handle the scheduling result appropriately:
        * If successful with no conflicts: Inform the user of the successful scheduling
@@ -128,7 +125,7 @@ def get_system_prompt(history: List[Message]) -> str:
     - Use appointment IDs when modifying or resolving conflicts
     - NEVER create new appointments when user refers to existing ones
     - For operations on existing appointments, use the appropriate method with the appointment's ID:
-      * Rescheduling: update_appointment (single appointment) or batch_update (multiple appointments)
+      * Rescheduling: batch_update (for single or multiple appointments)
       * Cancellation: cancel_appointment
     
     RESPONSE FORMATTING:
@@ -152,7 +149,8 @@ def get_system_prompt(history: List[Message]) -> str:
     - Use check_day_availability to check if a specific day has significant free time
     
     BATCH OPERATIONS:
-    - ALWAYS use batch_update when handling multiple appointment changes, especially in these scenarios:
+    - ALWAYS use batch_update when handling appointment changes, including:
+      * Updating a single appointment
       * Rescheduling one appointment requires changing others
       * When cancelling multiple appointments of the same type
       * When applying the same change to multiple appointments
@@ -180,11 +178,10 @@ def get_system_prompt(history: List[Message]) -> str:
       * Suggesting complex rescheduling without checking availability
       * Forgetting to provide detailed appointment information when querying
 
-    - When updating appointments, use the update_appointment function with the appointment ID:
-      Example: update_appointment(appointment_id=123, title="New Title", start_time="2025-03-01T10:00:00")
+    - When updating appointments, use the batch_update function with the appointment ID:
+      Example: batch_update([{{"appointment_id": 123, "title": "New Title", "start_time": "2025-03-01T10:00:00"}}])
 
     Remember to verify operations, check for conflicts after each action, and maintain conversation continuity.
-
     """
 
     logger.debug(
@@ -590,126 +587,50 @@ async def get_appointments(
 
 
 @calendar_agent.tool
-async def update_appointment(
-    ctx: RunContext[CalendarDependencies],
-    calendar_id: int,
-    appointment_id: int,
-    title: Optional[str] = None,
-    start_time: Optional[datetime] = None,
-    end_time: Optional[datetime] = None,
-    status: Optional[AppointmentStatus] = None,
-    priority: Optional[int] = None,
-    description: Optional[str] = None,
-    location: Optional[str] = None,
-) -> CalendarResponse:
-    """
-    Update an existing appointment
-
-    Args:
-        calendar_id: Calendar ID
-        appointment_id: ID of the appointment to update
-        title: New title of the appointment
-        start_time: New start time of the appointment
-        end_time: New end time of the appointment
-        status: New status of the appointment
-        priority: New priority of the appointment
-        description: New description of the appointment
-        location: New location of the appointment
-
-    Returns:
-        CalendarResponse with update result
-    """
-    # Try to update the appointment
-    success, updated, conflicts = ctx.deps.calendar.update_appointment(
-        calendar_id=calendar_id,
-        appointment_id=appointment_id,
-        title=title,
-        start_time=start_time,
-        end_time=end_time,
-        status=status,
-        priority=priority,
-        description=description,
-        location=location,
-    )
-
-    if success:
-        # Format the response with a clear time format
-        if start_time:
-            formatted_date = start_time.strftime("%B %d")
-            formatted_time = start_time.strftime("%I:%M %p").lstrip(
-                "0"
-            )  # Remove leading zero
-
-        changes = []
-
-        if title and title != updated.get("title"):
-            changes.append(f"title to '{title}'")
-
-        if start_time and start_time != datetime.fromisoformat(
-            updated.get("start_time")
-        ):
-            changes.append(
-                f"start time to {start_time.strftime('%I:%M %p').lstrip('0')}"
-            )
-
-        if end_time and end_time != datetime.fromisoformat(updated.get("end_time")):
-            changes.append(f"end time to {end_time.strftime('%I:%M %p').lstrip('0')}")
-
-        if priority and priority != updated.get("priority"):
-            changes.append(f"priority to {priority}")
-
-        if status and status != updated.get("status"):
-            changes.append(f"status to {status.name.lower()}")
-
-        if description and description != updated.get("description"):
-            changes.append("description")
-
-        if location and location != updated.get("location"):
-            changes.append(f"location to '{location}'")
-
-        changes_msg = ", ".join(changes)
-
-        # Prepare message about conflicts
-        conflicts_msg = ""
-        if conflicts and len(conflicts) > 0:
-            conflict_titles = [appt["title"] for appt in conflicts]
-            conflicts_msg = f" Note: This update creates conflicts with: {', '.join(conflict_titles)}. You may want to resolve these conflicts."
-
-        return CalendarResponse(
-            type="CALENDAR",
-            message=f"Successfully updated appointment '{updated['title']}': Changed {changes_msg}.{conflicts_msg}",
-            action_taken=f"Updated: {updated['title']}",
-            conflicts=conflicts if conflicts else None,
-        )
-    else:
-        return CalendarResponse(
-            type="CALENDAR",
-            message=f"Failed to update appointment {appointment_id}.",
-            action_taken="Failed: Could not update appointment",
-        )
-
-
-@calendar_agent.tool
 async def cancel_appointment(
     ctx: RunContext[CalendarDependencies], calendar_id: int, appointment_id: int
 ) -> CalendarResponse:
     """Cancel an appointment by ID"""
-    # Get the appointment before cancelling
-    appointment = ctx.deps.calendar.get_appointment(calendar_id, appointment_id)
-
-    # Try to cancel the appointment
-    success = ctx.deps.calendar.cancel_appointment(calendar_id, appointment_id)
-
-    if success and appointment:
+    try:
+        # Get the calendar service from dependencies
+        calendar_service = ctx.deps.calendar_service
+        
+        # Get the appointment before cancelling to include in the response
+        with calendar_service.session_factory() as session:
+            appointment = session.query(Appointment).filter_by(
+                id=appointment_id, calendar_id=calendar_id
+            ).first()
+            
+            if not appointment:
+                return CalendarResponse(
+                    type="CALENDAR",
+                    message=f"Failed to cancel appointment {appointment_id}: Appointment not found.",
+                    action_taken="Failed: Appointment not found",
+                )
+            
+            # Store appointment details before cancelling
+            appointment_title = appointment.title
+            appointment_start = appointment.start_time
+            
+            # Cancel the appointment
+            appointment.status = AppointmentStatus.CANCELLED
+            appointment.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            
+            # Format the response
+            formatted_date = appointment_start.strftime("%B %d")
+            formatted_time = appointment_start.strftime("%I:%M %p").lstrip("0")
+            
+            return CalendarResponse(
+                type="CALENDAR",
+                message=f"Successfully cancelled appointment '{appointment_title}' scheduled for {formatted_date} at {formatted_time}.",
+                action_taken=f"Cancelled: {appointment_title}",
+            )
+    except Exception as e:
+        logger.error(f"Error cancelling appointment: {e}")
         return CalendarResponse(
             type="CALENDAR",
-            message=f"Successfully cancelled appointment '{appointment['title']}'.",
-            action_taken=f"Cancelled: {appointment['title']}",
-        )
-    else:
-        return CalendarResponse(
-            type="CALENDAR",
-            message=f"Failed to cancel appointment {appointment_id}.",
+            message=f"Failed to cancel appointment {appointment_id}: {str(e)}",
             action_taken="Failed: Could not cancel appointment",
         )
 
@@ -743,6 +664,9 @@ async def batch_update(
             action_taken="No action taken",
         )
 
+    # Get the calendar service from dependencies
+    calendar_service = ctx.deps.calendar_service
+
     successful_updates = []
     failed_updates = []
     all_conflicts = []
@@ -754,6 +678,7 @@ async def batch_update(
             continue
 
         # Extract optional parameters
+        calendar_id = update.get("calendar_id")
         start_time = update.get("start_time")
         end_time = update.get("end_time")
         status_str = update.get("status")
@@ -776,13 +701,10 @@ async def batch_update(
                 )
                 continue
 
-        # Get calendar tool from dependencies
-        calendar = ctx.deps.calendar
-
-        # Perform the update
+        # Perform the update directly using calendar_service
         try:
-            success, updated_appointment, conflicts = calendar.update_appointment(
-                calendar_id=update.get("calendar_id"),
+            success, updated_appointment, conflicts = calendar_service.update_appointment(
+                calendar_id=calendar_id,
                 appointment_id=appointment_id,
                 title=title,
                 start_time=start_time,
@@ -797,7 +719,7 @@ async def batch_update(
                 successful_updates.append(
                     {
                         "appointment_id": appointment_id,
-                        "title": updated_appointment.get("title", ""),
+                        "title": updated_appointment.title,
                         "changes": {
                             k: v for k, v in update.items() if k != "appointment_id"
                         },
@@ -808,11 +730,11 @@ async def batch_update(
                     for conflict in conflicts:
                         all_conflicts.append(
                             {
-                                "appointment_id": conflict.get("id"),
-                                "title": conflict.get("title", ""),
-                                "start_time": conflict.get("start_time", ""),
-                                "end_time": conflict.get("end_time", ""),
-                                "priority": conflict.get("priority", 0),
+                                "appointment_id": conflict.id,
+                                "title": conflict.title,
+                                "start_time": conflict.start_time,
+                                "end_time": conflict.end_time,
+                                "priority": conflict.priority,
                                 "conflicts_with": appointment_id,
                             }
                         )

@@ -59,30 +59,18 @@ Based on the core user stories and following the principles of Occam's razor and
 - **Returns**: List of appointments matching the **criteria**
 - **Used in**: Priority Conflict Resolution, Basic Appointment Scheduling
 
-### 6. `update_appointment`
-- **Purpose**: Update an existing appointment
-- **Parameters**:
-  - `calendar_id`: ID of the calendar
-  - `appointment_id`: ID of the appointment to update
-  - `title`: Optional new title
-  - `start_time`: Optional new start time
-  - `end_time`: Optional new end time
-  - `status`: Optional new status
-  - `priority`: Optional new priority
-  - `description`: Optional new description
-  - `location`: Optional new location
-- **Returns**: Success status, updated appointment, and any conflicts
-- **Used in**: Priority Conflict Resolution
-
-### 7. `cancel_appointment`
+### 6. `cancel_appointment`
 - **Purpose**: Cancel an existing appointment
 - **Parameters**:
   - `calendar_id`: ID of the calendar
   - `appointment_id`: ID of the appointment to cancel
-- **Returns**: Success status and appointment details
+- **Returns**: CalendarResponse with cancellation result, including:
+  - Success status
+  - Appointment details that was cancelled
+  - Formatted message with appointment title and time
 - **Used in**: Priority Conflict Resolution
 
-### 8. `batch_update`
+### 7. `batch_update`
 - **Purpose**: Update multiple appointments in a single operation
 - **Parameters**:
   - `updates`: List of update operations, each containing:
@@ -97,7 +85,7 @@ Based on the core user stories and following the principles of Occam's razor and
 - **Returns**: Success status, updated appointments, and any conflicts
 - **Used in**: Priority Conflict Resolution
 
-### 9. `get_appointment`
+### 8. `get_appointment`
 - **Purpose**: Get details of a specific appointment by ID
 - **Parameters**:
   - `calendar_id`: ID of the calendar

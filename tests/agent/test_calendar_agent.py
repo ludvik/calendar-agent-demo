@@ -118,8 +118,8 @@ def test_check_availability_integration(calendar_service, test_calendar):
     )
 
     # Verify tool response structure
-    assert response.data.type == "BASE"
-    assert "available" in response.data.message.lower()
+    assert response.data.type == "CALENDAR"
+    assert "available" in response.data.message.lower() or "free" in response.data.message.lower()
 
     # Verify the time is actually not available in the database
     with calendar_service.session_factory() as session:
@@ -148,8 +148,8 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
     )
 
     # Verify tool response structure
-    assert response.data.type == "BASE"
-    assert "available" in response.data.message.lower()
+    assert response.data.type == "CALENDAR"
+    assert "free" in response.data.message.lower() or "slot" in response.data.message.lower()
 
     # Verify each suggested slot is actually available in the database
     if response.data.suggested_slots:
@@ -159,9 +159,8 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
                     session.query(Appointment)
                     .filter(
                         Appointment.calendar_id == test_calendar.id,
-                        Appointment.status == AppointmentStatus.CONFIRMED,
-                        Appointment.start_time < timeslot.end_time,
-                        Appointment.end_time > timeslot.start_time,
+                        Appointment.start_time < datetime.fromisoformat(timeslot.end_time),
+                        Appointment.end_time > datetime.fromisoformat(timeslot.start_time),
                     )
                     .all()
                 )
