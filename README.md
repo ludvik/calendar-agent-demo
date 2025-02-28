@@ -50,136 +50,52 @@ The system will indicate whether it's using the real GPT-4 model or running in t
 - Local file: `logs/calendar_agent.log` (detailed debug information)
 - Logfire dashboard (if configured)
 
+## Logfire Configuration and Usage
 
-## Tool Architecture
+[Logfire](https://logfire.dev/) is an observability platform that helps monitor and debug agent <--> interactions.
 
-### Base Tools Layer
+### Setting up Logfire
 
-#### `check_availability`
-**Purpose**: Check time slot availability
-**Input**:
-- start_time: datetime
-- end_time: datetime
-
-#### `schedule_appointment`
-**Purpose**: Create new appointment with conflict detection  
-**Input**:
-- time: datetime  
-- duration: minutes  
-- title: string  
-- priority: int (1-5)  
-
-**Output**:
-```python
-class ScheduleResponse:
-    success: bool
-    created_appointment: Optional[Appointment]
-    conflicts: List[Appointment]
-    message: str
+1. Install the Logfire CLI if you haven't already:
+```bash
+pip install logfire
 ```
 
-#### `reschedule_appointment`
-**Purpose**: Move existing appointment  
-**Input**:
-- appointment_id: UUID
-- new_time: datetime
+2. Authenticate with Logfire using the CLI:
+```bash
+logfire auth
+```
+This will open a browser window for you to log in to your Logfire account.
 
-#### `cancel_appointment`
-**Purpose**: Remove existing appointment
-**Input**:
-- appointment_id: UUID
-
-### Advanced Tools Layer
-
-#### `smart_schedule`
-**Enhanced Logic**:
-1. Attempt to move conflicting appointments first
-2. Cancel low-priority conflicts if rescheduling fails
-3. Create new appointment
-
-**Output Structure**:
-```python
-class SmartScheduleResponse:
-    created_appointment: Appointment
-    moved_appointments: List[Appointment]  # Successfully rescheduled
-    canceled_appointments: List[Appointment]  # Removed conflicts
-    remaining_conflicts: List[Appointment]  # Unresolvable conflicts
+3. (Optional) Configure additional Logfire settings in `.env`:
+```env
+# Logfire Configuration
+LOGFIRE_CONSOLE_LOG=false  # Set to true to enable Logfire console output
 ```
 
-### Advanced Tools Layer (Scenario Combinations)
+### Using Logfire
 
-#### `find_optimal_slots`
-**Purpose**: Find best available time slots with override logic
-**Input**:
-- time_range: (start: datetime, end: datetime)
-- duration: int
-- allow_override_priority_lower_than: int
-- max_results: int
-**Output**:
-```python
-[
-    {
-        "type": "free",
-        "start": datetime,
-        "end": datetime
-    },
-    {
-        "type": "override",
-        "start": datetime,
-        "end": datetime,
-        "conflicts": [
-            {
-                "id": int,
-                "title": str,
-                "priority": int
-            }
-        ]
-    }
-]
+Once authenticated, the Calendar Agent Demo will automatically send logs to your Logfire dashboard. This includes:
+
+- Application events and errors
+- HTTP request tracking (enabled by default)
+- Performance metrics
+
+To view your logs:
+1. Log in to your Logfire dashboard
+2. Navigate to the "Logs" section
+3. Filter by service name "calendar_agent"
+
+You can also use the CLI to view logs:
+```bash
+logfire logs --service calendar_agent
 ```
 
-#### `smart_schedule`  
-**Purpose**: Intelligent scheduling with auto-conflict resolution
-**Input**:
-- title: str
-- desired_time: datetime
-- duration: int
-- priority: int
-**Output**:
-```python
-{
-    "scheduled": bool,
-    "method": Literal["direct", "override"],
-    "appointment": Appointment,
-    "cancelled_appointments": List[int]
-}
+### Disabling Logfire
+
+If you don't want to use Logfire, you can log out using the CLI:
+```bash
+logfire logout
 ```
 
-### Auxiliary Tools Layer
-
-#### `get_calendar_overview`
-**Purpose**: Get calendar summary
-**Input**:
-- date_range: (start: date, end: date)
-**Output**:
-```python
-{
-    "busy_hours": float,
-    "high_priority_slots": List[TimeSlot],
-    "override_opportunities": List[OverrideSlot]
-}
-```
-
-#### `reschedule_low_priority`
-**Purpose**: Reschedule lower priority appointments
-**Input**:
-- target_window: (start: datetime, end: datetime)
-- min_priority: int
-**Output**:
-```python
-{
-    "rescheduled": int,
-    "freed_slots": List[TimeSlot],
-    "failed_reschedules": List[int]
-}
-```
+The application will fall back to local logging only when not authenticated with Logfire.
