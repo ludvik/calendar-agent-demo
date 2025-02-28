@@ -49,26 +49,53 @@ Based on the core user stories and following the principles of Occam's razor and
 - **Used in**: Identify Underutilized **Days**
 
 ### 5. `get_appointments`
-- **Purpose**: Retrieve appointments within a time range
-- **Parameters**:
-  - `calendar_id`: ID of the calendar
-  - `start_time`: Optional start time for the search
-  - `end_time`: Optional end time for the search
-  - `title_filter`: Optional title filter
-  - `priority`: Optional priority filter
-- **Returns**: List of appointments matching the **criteria**
-- **Used in**: Priority Conflict Resolution, Basic Appointment Scheduling
+Retrieves appointments within a specified time range with optional filtering.**Parameters:**
+- `calendar_id` (int): ID of the calendar to retrieve appointments from
+- `start_time` (datetime, optional): Start of the time range (defaults to today)
+- `end_time` (datetime, optional): End of the time range (defaults to 7 days from now)
+- `title_filter` (str, optional): Filter appointments by title (case-insensitive partial match)
+- `priority` (int, optional): Filter appointments by exact priority match
+**Returns:**
+- `CalendarResponse`: Response object containing:
+  - `type`: "CALENDAR"
+  - `message`: Description of the appointments found or not found
+  - `action_taken`: Summary of the action performed
+**Example Usage:**
+```python
+# Get all appointments for the next week
+response = await get_appointments(ctx, calendar_id=1)
+
+# Get appointments for a specific date range with title filter
+response = await get_appointments(
+    ctx,
+    calendar_id=1,
+    start_time=datetime(2023, 5, 1, tzinfo=timezone.utc),
+    end_time=datetime(2023, 5, 7, tzinfo=timezone.utc),
+    title_filter="Meeting"
+)
+
+# Get high-priority appointments only
+response = await get_appointments(ctx, calendar_id=1, priority=3)
+```
 
 ### 6. `cancel_appointment`
-- **Purpose**: Cancel an existing appointment
-- **Parameters**:
-  - `calendar_id`: ID of the calendar
-  - `appointment_id`: ID of the appointment to cancel
-- **Returns**: CalendarResponse with cancellation result, including:
-  - Success status
-  - Appointment details that was cancelled
-  - Formatted message with appointment title and time
-- **Used in**: Priority Conflict Resolution
+Cancels an existing appointment by its ID.
+
+**Parameters:**
+- `calendar_id` (int): ID of the calendar containing the appointment
+- `appointment_id` (int): ID of the appointment to cancel
+
+**Returns:**
+- `CalendarResponse`: Response object containing:
+  - `type`: "CALENDAR"
+  - `message`: Description of the cancellation result
+  - `action_taken`: Summary of the action performed
+
+**Example Usage:**
+```python
+# Cancel an appointment
+response = await cancel_appointment(ctx, calendar_id=1, appointment_id=123)
+```
 
 ### 7. `batch_update`
 - **Purpose**: Update multiple appointments in a single operation

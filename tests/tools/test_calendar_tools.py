@@ -1,7 +1,8 @@
 """Tests for calendar tools."""
 
+import json
 from datetime import datetime, time, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai import RunContext
@@ -10,18 +11,17 @@ from sqlalchemy.orm import sessionmaker
 
 from calendar_agent.agent import (
     CalendarDependencies,
-    CalendarResponse,
-    Message,
     batch_update,
     cancel_appointment,
     check_availability,
     check_day_availability,
     find_available_time_slots,
+    get_appointments,
     schedule_appointment,
 )
 from calendar_agent.calendar_service import CalendarService
-from calendar_agent.calendar_tool import Appointment, AppointmentStatus, CalendarTool
-from calendar_agent.models import Appointment, Base, Calendar
+from calendar_agent.models import Appointment, AppointmentStatus, Base, Calendar
+from calendar_agent.response import CalendarResponse, TimeSlot
 
 
 @pytest.fixture
@@ -51,12 +51,6 @@ def calendar_service(db_session):
 
 
 @pytest.fixture
-def calendar_tool(calendar_service):
-    """Create a calendar tool with the calendar service."""
-    return CalendarTool(calendar_service)
-
-
-@pytest.fixture
 def test_calendar(calendar_service):
     """Create a test calendar."""
     return calendar_service.create_calendar(
@@ -65,14 +59,13 @@ def test_calendar(calendar_service):
 
 
 @pytest.fixture
-def mock_run_context(calendar_tool, calendar_service):
+def mock_run_context(calendar_service):
     """Create a mock RunContext with CalendarDependencies."""
     # Create a mock RunContext
     mock_ctx = MagicMock(spec=RunContext)
 
     # Set up the deps attribute with CalendarDependencies
     mock_ctx.deps = CalendarDependencies(
-        calendar=calendar_tool,
         calendar_service=calendar_service,
         conversation_history=[],
     )
@@ -102,11 +95,10 @@ async def test_schedule_appointment_success(
     )
 
     # Verify the response
-    assert isinstance(response, CalendarResponse)
     assert response.type == "CALENDAR"
     assert "Successfully scheduled" in response.message
     assert "Test Meeting" in response.message
-    assert response.conflicts is None
+    assert response.action_taken.startswith("Scheduled:")
 
     # Verify the appointment in the database
     with calendar_service.session_factory() as session:
@@ -161,7 +153,6 @@ async def test_schedule_appointment_conflict(
     )
 
     # Verify the response
-    assert isinstance(response, CalendarResponse)
     assert response.type == "CALENDAR"
     assert "not available" in response.message
     assert "Failed" in response.action_taken
@@ -227,7 +218,6 @@ async def test_schedule_appointment_with_lower_priority_conflict(
     )
 
     # Verify the response
-    assert isinstance(response, CalendarResponse)
     assert response.type == "CALENDAR"
     assert "Successfully scheduled" in response.message
     assert "Important Meeting" in response.message
@@ -291,9 +281,8 @@ async def test_check_availability_available(
     )
 
     # Verify the response
-    assert isinstance(response, CalendarResponse)
     assert response.type == "CALENDAR"
-    assert "available" in response.message
+    assert "available" in response.message.lower()
     assert "2:00 PM" in response.message
     assert "Checked availability" in response.action_taken
 
@@ -341,9 +330,8 @@ async def test_check_availability_not_available(
     )
 
     # Verify the response
-    assert isinstance(response, CalendarResponse)
     assert response.type == "CALENDAR"
-    assert "not available" in response.message
+    assert "not available" in response.message.lower()
     assert "2:00 PM" in response.message
     assert "Checked availability" in response.action_taken
 
@@ -360,7 +348,9 @@ async def test_check_availability_not_available(
 
 
 @pytest.mark.asyncio
-async def test_find_available_time_slots_success(mock_run_context, test_calendar, calendar_service):
+async def test_find_available_time_slots_success(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test find_available_time_slots when time slots are available."""
     # Setup test data
     now = datetime.now(timezone.utc)
@@ -385,24 +375,26 @@ async def test_find_available_time_slots_success(mock_run_context, test_calendar
 
 
 @pytest.mark.asyncio
-async def test_find_available_time_slots_empty(mock_run_context, test_calendar, calendar_service):
+async def test_find_available_time_slots_empty(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test find_available_time_slots when no time slots are available."""
     # Setup test data
     now = datetime.now(timezone.utc)
     start_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
     end_time = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    
+
     # Create appointments for the entire time range to ensure no slots are available
     for hour in range(10, 12):
         appointment = Appointment(
             calendar_id=test_calendar.id,
             title=f"Existing Meeting at {hour}",
             start_time=start_time.replace(hour=hour),
-            end_time=start_time.replace(hour=hour+1),
+            end_time=start_time.replace(hour=hour + 1),
             status=AppointmentStatus.CONFIRMED,
             priority=3,
         )
-        
+
         with calendar_service.session_factory() as session:
             session.add(appointment)
             session.commit()
@@ -437,14 +429,16 @@ async def test_find_available_time_slots_missing_params(mock_run_context):
 
 
 @pytest.mark.asyncio
-async def test_check_day_availability_free(mock_run_context, test_calendar, calendar_service):
+async def test_check_day_availability_free(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test check_day_availability when the day is completely free."""
     # Get the test calendar
     calendar = test_calendar
 
     # Use tomorrow's date to avoid conflicts with other tests
     tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-    
+
     # Call the function
     result = await find_available_time_slots(
         mock_run_context,
@@ -453,14 +447,14 @@ async def test_check_day_availability_free(mock_run_context, test_calendar, cale
         end_time=tomorrow + timedelta(hours=8),
         duration=30,
     )
-    
+
     # Call the check_day_availability function
     response = await check_day_availability(
         mock_run_context,
         calendar_id=calendar.id,
         date=tomorrow,
     )
-    
+
     # Verify the response
     assert response.message.startswith("The entire day from")
     assert "is available" in response.message
@@ -469,18 +463,24 @@ async def test_check_day_availability_free(mock_run_context, test_calendar, cale
 
 
 @pytest.mark.asyncio
-async def test_check_day_availability_with_appointments(mock_run_context, test_calendar, calendar_service):
+async def test_check_day_availability_with_appointments(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test check_day_availability when there are appointments on the day."""
     # Get the test calendar
     calendar = test_calendar
 
     # Use day after tomorrow to avoid conflicts with other tests
     day_after_tomorrow = datetime.now(timezone.utc) + timedelta(days=2)
-    
+
     # Create a test appointment
-    start_time = datetime.combine(day_after_tomorrow.date(), time(10, 0)).replace(tzinfo=timezone.utc)
-    end_time = datetime.combine(day_after_tomorrow.date(), time(11, 0)).replace(tzinfo=timezone.utc)
-    
+    start_time = datetime.combine(day_after_tomorrow.date(), time(10, 0)).replace(
+        tzinfo=timezone.utc
+    )
+    end_time = datetime.combine(day_after_tomorrow.date(), time(11, 0)).replace(
+        tzinfo=timezone.utc
+    )
+
     # Schedule an appointment
     appointment = Appointment(
         calendar_id=calendar.id,
@@ -490,25 +490,25 @@ async def test_check_day_availability_with_appointments(mock_run_context, test_c
         status=AppointmentStatus.CONFIRMED,
         priority=1,
     )
-    
+
     # Use session_factory() with a context manager as done in other tests
     with calendar_service.session_factory() as session:
         session.add(appointment)
         session.commit()
-    
+
     # Call the check_day_availability function
     response = await check_day_availability(
         mock_run_context,
         calendar_id=calendar.id,
         date=day_after_tomorrow,
     )
-    
+
     # Verify the response
     assert "Busy times" in response.message
     assert "Test Appointment" in response.message
     assert response.action_taken == "Found 1 appointments"
     assert response.suggested_slots is None
-    
+
     # Clean up
     with calendar_service.session_factory() as session:
         session.delete(appointment)
@@ -523,13 +523,13 @@ async def test_batch_update_success(mock_run_context, test_calendar, calendar_se
 
     # Create test appointments
     now = datetime.now(timezone.utc)
-    
+
     # Create two appointments
     appointments = []
     for i in range(2):
-        start_time = now + timedelta(days=i+3, hours=10)  # Start at 10 AM
-        end_time = now + timedelta(days=i+3, hours=11)    # End at 11 AM
-        
+        start_time = now + timedelta(days=i + 3, hours=10)  # Start at 10 AM
+        end_time = now + timedelta(days=i + 3, hours=11)  # End at 11 AM
+
         appointment = Appointment(
             calendar_id=calendar.id,
             title=f"Test Appointment {i+1}",
@@ -538,13 +538,13 @@ async def test_batch_update_success(mock_run_context, test_calendar, calendar_se
             status=AppointmentStatus.CONFIRMED,
             priority=3,
         )
-        
+
         with calendar_service.session_factory() as session:
             session.add(appointment)
             session.commit()
             appointment_id = appointment.id
             appointments.append(appointment_id)
-    
+
     # Create batch update operations
     updates = [
         {
@@ -556,42 +556,46 @@ async def test_batch_update_success(mock_run_context, test_calendar, calendar_se
             "appointment_id": appointments[1],
             "title": "Updated Appointment 2",
             "start_time": now + timedelta(days=4, hours=14),  # Change to 2 PM
-            "end_time": now + timedelta(days=4, hours=15),    # Change to 3 PM
+            "end_time": now + timedelta(days=4, hours=15),  # Change to 3 PM
         },
     ]
-    
+
     # Call batch_update
     response = await batch_update(mock_run_context, updates)
-    
+
     # Verify response
     assert response.type == "CALENDAR"
     assert "Successfully updated 2 appointments" in response.message
     assert response.action_taken == "Batch updated 2 appointments"
-    
+
     # Verify the appointments were actually updated
     with calendar_service.session_factory() as session:
         # Check first appointment
         appt1 = session.query(Appointment).filter_by(id=appointments[0]).first()
         assert appt1.title == "Updated Appointment 1"
         assert appt1.priority == 2
-        
+
         # Check second appointment
         appt2 = session.query(Appointment).filter_by(id=appointments[1]).first()
         assert appt2.title == "Updated Appointment 2"
         assert appt2.start_time.hour == (now + timedelta(days=4, hours=14)).hour
         assert appt2.end_time.hour == (now + timedelta(days=4, hours=15)).hour
-    
+
     # Clean up
     with calendar_service.session_factory() as session:
         for appointment_id in appointments:
-            appointment = session.query(Appointment).filter_by(id=appointment_id).first()
+            appointment = (
+                session.query(Appointment).filter_by(id=appointment_id).first()
+            )
             if appointment:
                 session.delete(appointment)
         session.commit()
 
 
 @pytest.mark.asyncio
-async def test_batch_update_partial_failure(mock_run_context, test_calendar, calendar_service):
+async def test_batch_update_partial_failure(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test batch_update with some failed updates."""
     # Get the test calendar
     calendar = test_calendar
@@ -599,8 +603,8 @@ async def test_batch_update_partial_failure(mock_run_context, test_calendar, cal
     # Create a test appointment
     now = datetime.now(timezone.utc)
     start_time = now + timedelta(days=5, hours=10)  # Start at 10 AM
-    end_time = now + timedelta(days=5, hours=11)    # End at 11 AM
-    
+    end_time = now + timedelta(days=5, hours=11)  # End at 11 AM
+
     appointment = Appointment(
         calendar_id=calendar.id,
         title="Test Appointment",
@@ -609,12 +613,12 @@ async def test_batch_update_partial_failure(mock_run_context, test_calendar, cal
         status=AppointmentStatus.CONFIRMED,
         priority=3,
     )
-    
+
     with calendar_service.session_factory() as session:
         session.add(appointment)
         session.commit()
         appointment_id = appointment.id
-    
+
     # Create batch update operations with one valid and one invalid
     updates = [
         {
@@ -627,21 +631,21 @@ async def test_batch_update_partial_failure(mock_run_context, test_calendar, cal
             "title": "This should fail",
         },
     ]
-    
+
     # Call batch_update
     response = await batch_update(mock_run_context, updates)
-    
+
     # Verify response
     assert response.type == "CALENDAR"
     assert "Partially successful" in response.message
     assert "1 updates failed" in response.message
-    
+
     # Verify the valid appointment was updated
     with calendar_service.session_factory() as session:
         appt = session.query(Appointment).filter_by(id=appointment_id).first()
         assert appt.title == "Updated Appointment"
         assert appt.priority == 2
-    
+
     # Clean up
     with calendar_service.session_factory() as session:
         appointment = session.query(Appointment).filter_by(id=appointment_id).first()
@@ -655,7 +659,7 @@ async def test_batch_update_empty(mock_run_context):
     """Test batch_update with empty updates list."""
     # Call batch_update with empty list
     response = await batch_update(mock_run_context, [])
-    
+
     # Verify response
     assert response.type == "CALENDAR"
     assert "No updates provided" in response.message
@@ -663,7 +667,9 @@ async def test_batch_update_empty(mock_run_context):
 
 
 @pytest.mark.asyncio
-async def test_cancel_appointment_success(mock_run_context, test_calendar, calendar_service):
+async def test_cancel_appointment_success(
+    mock_run_context, test_calendar, calendar_service
+):
     """Test cancel_appointment with a valid appointment."""
     # Get the test calendar
     calendar = test_calendar
@@ -671,8 +677,8 @@ async def test_cancel_appointment_success(mock_run_context, test_calendar, calen
     # Create a test appointment
     now = datetime.now(timezone.utc)
     start_time = now + timedelta(days=1, hours=10)  # Start at 10 AM tomorrow
-    end_time = now + timedelta(days=1, hours=11)    # End at 11 AM tomorrow
-    
+    end_time = now + timedelta(days=1, hours=11)  # End at 11 AM tomorrow
+
     appointment = Appointment(
         calendar_id=calendar.id,
         title="Test Appointment",
@@ -681,26 +687,28 @@ async def test_cancel_appointment_success(mock_run_context, test_calendar, calen
         status=AppointmentStatus.CONFIRMED,
         priority=3,
     )
-    
+
     with calendar_service.session_factory() as session:
         session.add(appointment)
         session.commit()
         appointment_id = appointment.id
-    
+
     # Call cancel_appointment
     response = await cancel_appointment(mock_run_context, calendar.id, appointment_id)
-    
+
     # Verify response
     assert response.type == "CALENDAR"
     assert "Successfully cancelled appointment" in response.message
     assert "Test Appointment" in response.message
     assert response.action_taken.startswith("Cancelled:")
-    
+
     # Verify the appointment was actually cancelled
     with calendar_service.session_factory() as session:
-        updated_appointment = session.query(Appointment).filter_by(id=appointment_id).first()
+        updated_appointment = (
+            session.query(Appointment).filter_by(id=appointment_id).first()
+        )
         assert updated_appointment.status == AppointmentStatus.CANCELLED
-    
+
     # Clean up
     with calendar_service.session_factory() as session:
         session.delete(updated_appointment)
@@ -712,11 +720,164 @@ async def test_cancel_appointment_not_found(mock_run_context, test_calendar):
     """Test cancel_appointment with a non-existent appointment."""
     # Use a non-existent appointment ID
     non_existent_id = 9999
-    
+
     # Call cancel_appointment
-    response = await cancel_appointment(mock_run_context, test_calendar.id, non_existent_id)
-    
+    response = await cancel_appointment(
+        mock_run_context, test_calendar.id, non_existent_id
+    )
+
     # Verify response
     assert response.type == "CALENDAR"
     assert "Appointment not found" in response.message
     assert response.action_taken == "Failed: Appointment not found"
+
+
+@pytest.mark.asyncio
+async def test_get_appointments_success(
+    mock_run_context, test_calendar, calendar_service
+):
+    """Test get_appointments with multiple appointments."""
+    # Get the test calendar
+    calendar = test_calendar
+
+    # Create test appointments
+    now = datetime.now(timezone.utc)
+    appointments = []
+
+    # Create three appointments with different titles and priorities
+    for i in range(3):
+        start_time = now + timedelta(days=i + 1, hours=10)  # Start at 10 AM
+        end_time = now + timedelta(days=i + 1, hours=11)  # End at 11 AM
+
+        appointment = Appointment(
+            calendar_id=calendar.id,
+            title=f"Test Appointment {i+1}",
+            start_time=start_time,
+            end_time=end_time,
+            status=AppointmentStatus.CONFIRMED,
+            priority=i + 1,  # Different priorities
+        )
+
+        with calendar_service.session_factory() as session:
+            session.add(appointment)
+            session.commit()
+            appointments.append(appointment.id)
+
+    # Call get_appointments with no filters
+    response = await get_appointments(
+        mock_run_context, calendar.id, start_time=now, end_time=now + timedelta(days=4)
+    )
+
+    # Verify response
+    assert response.type == "CALENDAR"
+    assert "Found 3 appointments" in response.message
+    assert response.action_taken == "Found 3 appointments"
+
+    # Call get_appointments with title filter
+    response = await get_appointments(
+        mock_run_context,
+        calendar.id,
+        start_time=now,
+        end_time=now + timedelta(days=4),
+        title_filter="Appointment 1",
+    )
+
+    # Verify response
+    assert response.type == "CALENDAR"
+    assert "Found 1 appointments matching 'Appointment 1'" in response.message
+    assert response.action_taken == "Found 1 appointments"
+
+    # Call get_appointments with priority filter
+    response = await get_appointments(
+        mock_run_context,
+        calendar.id,
+        start_time=now,
+        end_time=now + timedelta(days=4),
+        priority=2,
+    )
+
+    # Verify response
+    assert response.type == "CALENDAR"
+    assert "Found 1 appointments" in response.message
+    assert "Priority: 2" in response.message
+    assert response.action_taken == "Found 1 appointments"
+
+    # Clean up
+    with calendar_service.session_factory() as session:
+        for appointment_id in appointments:
+            appointment = (
+                session.query(Appointment).filter_by(id=appointment_id).first()
+            )
+            if appointment:
+                session.delete(appointment)
+        session.commit()
+
+
+@pytest.mark.asyncio
+async def test_get_appointments_empty(mock_run_context, test_calendar):
+    """Test get_appointments with no appointments."""
+    # Call get_appointments with a future time range
+    far_future = datetime.now(timezone.utc) + timedelta(days=365)
+    response = await get_appointments(
+        mock_run_context,
+        test_calendar.id,
+        start_time=far_future,
+        end_time=far_future + timedelta(days=7),
+    )
+
+    # Verify response
+    assert response.type == "CALENDAR"
+    assert "No appointments found" in response.message
+    assert response.action_taken == "No appointments found"
+
+
+@pytest.mark.asyncio
+async def test_get_appointments_with_title_not_found(
+    mock_run_context, test_calendar, calendar_service
+):
+    """Test get_appointments with a title filter that matches no appointments."""
+    # Get the test calendar
+    calendar = test_calendar
+
+    # Create a test appointment
+    now = datetime.now(timezone.utc)
+    start_time = now + timedelta(days=1, hours=10)  # Start at 10 AM
+    end_time = now + timedelta(days=1, hours=11)  # End at 11 AM
+
+    appointment = Appointment(
+        calendar_id=calendar.id,
+        title="Test Appointment",
+        start_time=start_time,
+        end_time=end_time,
+        status=AppointmentStatus.CONFIRMED,
+        priority=3,
+    )
+
+    with calendar_service.session_factory() as session:
+        session.add(appointment)
+        session.commit()
+        appointment_id = appointment.id
+
+    # Call get_appointments with a non-matching title filter
+    response = await get_appointments(
+        mock_run_context,
+        calendar.id,
+        start_time=now,
+        end_time=now + timedelta(days=2),
+        title_filter="Non-existent Appointment",
+    )
+
+    # Verify response
+    assert response.type == "CALENDAR"
+    assert (
+        "No appointments found with title containing 'Non-existent Appointment'"
+        in response.message
+    )
+    assert response.action_taken == "No appointments found"
+
+    # Clean up
+    with calendar_service.session_factory() as session:
+        appointment = session.query(Appointment).filter_by(id=appointment_id).first()
+        if appointment:
+            session.delete(appointment)
+        session.commit()

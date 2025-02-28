@@ -12,11 +12,10 @@ from calendar_agent.agent import (
     RunContext,
     batch_update,
     calendar_agent,
-    run_with_calendar,
-    run_with_calendar_sync,
+    run,
+    run_sync,
 )
 from calendar_agent.calendar_service import CalendarService
-from calendar_agent.calendar_tool import CalendarTool
 from calendar_agent.config import DatabaseConfig
 from calendar_agent.models import Appointment, AppointmentStatus, Base, Calendar
 from calendar_agent.response import CalendarResponse, ResponseType, TimeSlot
@@ -65,8 +64,10 @@ async def test_schedule_appointment_integration(calendar_service, test_calendar)
     history = [Message(role="user", content=prompt)]
 
     # Process through agent using the async version
-    result = await run_with_calendar(
-        prompt, history, calendar_service, test_calendar.id
+    result = await run(
+        user_prompt=prompt,
+        calendar_service=calendar_service,
+        history=history,
     )
 
     # Verify the result
@@ -113,8 +114,10 @@ def test_check_availability_integration(calendar_service, test_calendar):
     history = [Message(role="user", content=prompt)]
 
     # Process through agent
-    response = run_with_calendar_sync(
-        prompt, history, calendar_service, test_calendar.id
+    response = run_sync(
+        user_prompt=prompt,
+        calendar_service=calendar_service,
+        history=history,
     )
 
     # Verify tool response structure
@@ -143,8 +146,10 @@ def test_find_free_slots_integration(calendar_service, test_calendar):
     history = [Message(role="user", content=prompt)]
 
     # Process through agent
-    response = run_with_calendar_sync(
-        prompt, history, calendar_service, test_calendar.id
+    response = run_sync(
+        user_prompt=prompt,
+        calendar_service=calendar_service,
+        history=history,
     )
 
     # Verify tool response structure
@@ -243,8 +248,10 @@ def test_priority_conflict_resolution_integration(calendar_service, test_calenda
     history = [Message(role="user", content=prompt)]
 
     # 3. Process through agent
-    response = run_with_calendar_sync(
-        prompt, history, calendar_service, test_calendar.id
+    response = run_sync(
+        user_prompt=prompt,
+        calendar_service=calendar_service,
+        history=history,
     )
 
     # 4. Verify response type is correct (this is a structured field, not natural language)
@@ -305,8 +312,10 @@ def test_priority_conflict_resolution_integration(calendar_service, test_calenda
     history.append(Message(role="user", content=confirm_prompt))
 
     # 7. Process confirmation through agent
-    confirm_response = run_with_calendar_sync(
-        confirm_prompt, history, calendar_service, test_calendar.id
+    confirm_response = run_sync(
+        user_prompt=confirm_prompt,
+        calendar_service=calendar_service,
+        history=history,
     )
 
     # 8. Verify response type is correct (this is a structured field, not natural language)
@@ -457,7 +466,6 @@ async def test_resolve_conflicts_with_type_based_strategies():
 
     # Create dependencies
     calendar_service = CalendarService(session_maker)
-    calendar_tool = CalendarTool(calendar_service)
 
     # Create natural language prompt for the LLM
     tomorrow_afternoon = (
@@ -482,7 +490,11 @@ async def test_resolve_conflicts_with_type_based_strategies():
     history = [Message(role="user", content=prompt)]
 
     # Run the agent with the natural language prompt using the async version
-    result = await run_with_calendar(prompt, history, calendar_service, calendar_id)
+    result = await run(
+        user_prompt=prompt,
+        calendar_service=calendar_service,
+        history=history,
+    )
 
     # Print the result object structure for debugging
     print(f"Result type: {type(result)}")

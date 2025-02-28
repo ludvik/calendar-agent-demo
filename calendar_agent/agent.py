@@ -8,8 +8,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, models
 
-from .calendar_tool import Appointment, AppointmentStatus, CalendarTool
 from .calendar_service import CalendarService
+from .models import Appointment, AppointmentStatus
 from .config import config
 from .response import BaseResponse, CalendarResponse, ResponseType, TimeSlot
 
@@ -40,7 +40,6 @@ class AppointmentReference(BaseModel):
 class CalendarDependencies(BaseModel):
     """Dependencies for calendar agent"""
 
-    calendar: CalendarTool
     calendar_service: CalendarService
     conversation_history: List[Message]
 
@@ -344,9 +343,9 @@ async def check_day_availability(
         start_time = datetime.combine(date.date(), business_start)
         end_time = datetime.combine(date.date(), business_end)
         success, appointments = calendar_service.get_appointments_in_range(
+            calendar_id=calendar_id,
             start_time=start_time,
             end_time=end_time,
-            calendar_id=calendar_id,
         )
         
         if not success:
@@ -517,72 +516,110 @@ async def get_appointments(
     end_time: Optional[datetime] = None,
     title_filter: Optional[str] = None,
     priority: Optional[int] = None,
-) -> List[Dict]:
+) -> CalendarResponse:
     """Get appointments within a time range with optional filters"""
-    appointments = ctx.deps.calendar.get_appointments(
-        calendar_id, start_time, end_time, title_filter, priority
-    )
-
-    # Format appointment details for better readability
-    formatted_appointments = []
-    for appt in appointments:
-        start_time_str = appt["start_time"]
-        end_time_str = appt["end_time"]
-
-        if hasattr(start_time_str, "strftime"):
-            start_time_str = start_time_str.strftime("%I:%M %p").lstrip("0")
-
-        if hasattr(end_time_str, "strftime"):
-            end_time_str = end_time_str.strftime("%I:%M %p").lstrip("0")
-
-        formatted_appointments.append(
-            f"{appt['title']} from {start_time_str} to {end_time_str} (Priority: {appt['priority']}, ID: {appt['id']})"
+    try:
+        # Get the calendar service from dependencies
+        calendar_service = ctx.deps.calendar_service
+        
+        # Set default time range if not provided
+        if not start_time:
+            start_time = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        if not end_time:
+            end_time = datetime.now(timezone.utc) + timedelta(days=7)
+            
+        # Get appointments in range
+        success, appointments = calendar_service.get_appointments_in_range(
+            calendar_id=calendar_id,
+            start_time=start_time,
+            end_time=end_time,
         )
-
-    if title_filter:
-        filtered_appointments = [
-            appt
-            for appt in appointments
-            if title_filter.lower() in appt["title"].lower()
-        ]
-        if filtered_appointments:
-            details = "\n- " + "\n- ".join(formatted_appointments)
+        
+        if not success or not appointments:
+            time_range_msg = ""
+            if start_time and end_time:
+                time_range_msg = f" between {start_time.strftime('%Y-%m-%d')} and {end_time.strftime('%Y-%m-%d')}"
+            
             return CalendarResponse(
                 type="CALENDAR",
-                message=f"Found {len(filtered_appointments)} appointments matching '{title_filter}':{details}",
+                message=f"No appointments found{time_range_msg}.",
+                action_taken="No appointments found",
+            )
+            
+        # Apply filters
+        filtered_appointments = []
+        for appointment in appointments:
+            # Skip cancelled appointments
+            if appointment.status == AppointmentStatus.CANCELLED:
+                continue
+                
+            # Apply title filter if specified
+            if title_filter and title_filter.lower() not in appointment.title.lower():
+                continue
+                
+            # Apply priority filter if specified
+            if priority is not None and appointment.priority != priority:
+                continue
+                
+            filtered_appointments.append(appointment)
+            
+        # Format appointment details for better readability
+        formatted_appointments = []
+        for appt in filtered_appointments:
+            start_time_str = appt.start_time.strftime("%I:%M %p").lstrip("0")
+            end_time_str = appt.end_time.strftime("%I:%M %p").lstrip("0")
+            formatted_date = appt.start_time.strftime("%B %d")
+            
+            formatted_appointments.append(
+                f"{appt.title} on {formatted_date} from {start_time_str} to {end_time_str} (Priority: {appt.priority}, ID: {appt.id})"
+            )
+            
+        if title_filter:
+            if filtered_appointments:
+                details = "\n- " + "\n- ".join(formatted_appointments)
+                return CalendarResponse(
+                    type="CALENDAR",
+                    message=f"Found {len(filtered_appointments)} appointments matching '{title_filter}':{details}",
+                    action_taken=f"Found {len(filtered_appointments)} appointments",
+                )
+            else:
+                return CalendarResponse(
+                    type="CALENDAR",
+                    message=f"No appointments found with title containing '{title_filter}'.",
+                    action_taken="No appointments found",
+                )
+        elif filtered_appointments:
+            details = "\n- " + "\n- ".join(formatted_appointments)
+            time_range_msg = ""
+            if start_time and end_time:
+                start_date = start_time.strftime("%Y-%m-%d")
+                end_date = end_time.strftime("%Y-%m-%d")
+                if start_date == end_date:
+                    time_range_msg = f" for {start_date}"
+                else:
+                    time_range_msg = f" between {start_date} and {end_date}"
+                    
+            return CalendarResponse(
+                type="CALENDAR",
+                message=f"Found {len(filtered_appointments)} appointments{time_range_msg}:{details}",
                 action_taken=f"Found {len(filtered_appointments)} appointments",
             )
         else:
+            time_range_msg = ""
+            if start_time and end_time:
+                time_range_msg = f" between {start_time.strftime('%Y-%m-%d')} and {end_time.strftime('%Y-%m-%d')}"
+                
             return CalendarResponse(
                 type="CALENDAR",
-                message=f"No appointments found with title containing '{title_filter}'.",
+                message=f"No appointments found{time_range_msg}.",
                 action_taken="No appointments found",
             )
-    elif len(appointments) > 0:
-        details = "\n- " + "\n- ".join(formatted_appointments)
-        time_range_msg = ""
-        if start_time and end_time:
-            start_date = start_time.strftime("%Y-%m-%d")
-            end_date = end_time.strftime("%Y-%m-%d")
-            if start_date == end_date:
-                time_range_msg = f" for {start_date}"
-            else:
-                time_range_msg = f" between {start_date} and {end_date}"
-
+    except Exception as e:
+        logger.error(f"Error in get_appointments: {e}")
         return CalendarResponse(
             type="CALENDAR",
-            message=f"Found {len(appointments)} appointments{time_range_msg}:{details}",
-            action_taken=f"Found {len(appointments)} appointments",
-        )
-    else:
-        time_range_msg = ""
-        if start_time and end_time:
-            time_range_msg = f" between {start_time.strftime('%Y-%m-%d')} and {end_time.strftime('%Y-%m-%d')}"
-
-        return CalendarResponse(
-            type="CALENDAR",
-            message=f"No appointments found{time_range_msg}.",
-            action_taken="No appointments found",
+            message=f"Error retrieving appointments: {str(e)}",
+            action_taken="Failed: Could not retrieve appointments",
         )
 
 
@@ -773,56 +810,48 @@ async def batch_update(
     )
 
 
-def run_with_calendar(
-    prompt: str,
-    history: List[Message],
+async def run(
+    user_prompt: str,
     calendar_service: CalendarService,
-    calendar_id: int,
+    history: Optional[List[Message]] = None,
 ):
     """Run the agent with calendar dependencies properly set up"""
-    logfire.info("calendar_agent run", prompt=prompt)
-    calendar = CalendarTool(calendar_service)
+    logfire.info("calendar_agent run", prompt=user_prompt)
 
     deps = CalendarDependencies(
-        calendar=calendar,
         calendar_service=calendar_service,
-        conversation_history=history,
+        conversation_history=history or [],
     )
 
-    # Update system prompt with current history
-    calendar_agent.system_prompt = get_system_prompt(history)
-    response = calendar_agent.run(prompt, deps=deps)
-    logfire.info("calendar_agent response", response=response)
-    # Ensure logs are sent to Logfire
-    logfire.force_flush()
+    response = await calendar_agent.run(
+        user_prompt=user_prompt,
+        deps=deps,
+    )
+
     return response
 
 
-def run_with_calendar_sync(
-    prompt: str,
-    history: List[Message],
+def run_sync(
+    user_prompt: str,
     calendar_service: CalendarService,
-    calendar_id: int,
-) -> Dict:
-    """Synchronous version of run_with_calendar"""
-    logfire.info("calendar_agent run_sync", prompt=prompt)
+    history: Optional[List[Message]] = None,
+):
+    """Run the agent synchronously with calendar dependencies properly set up"""
     import asyncio
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    calendar = CalendarTool(calendar_service)
 
     deps = CalendarDependencies(
-        calendar=calendar,
         calendar_service=calendar_service,
-        conversation_history=history,
+        conversation_history=history or [],
     )
 
-    # Update system prompt with current history
-    calendar_agent.system_prompt = get_system_prompt(history)
+    response = loop.run_until_complete(
+        calendar_agent.run(
+            user_prompt=user_prompt,
+            deps=deps,
+        )
+    )
 
-    # Run the agent
-    response = loop.run_until_complete(calendar_agent.run(prompt, deps=deps))
-    loop.close()
-    logfire.force_flush()
     return response
