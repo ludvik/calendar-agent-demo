@@ -921,6 +921,144 @@ async def batch_update(
     )
 
 
+@calendar_agent.tool
+async def check_date_range_availability(
+    ctx: RunContext[CalendarDependencies], 
+    calendar_id: int, 
+    start_date: datetime,
+    end_date: datetime,
+    weekdays_only: bool = False
+) -> CalendarResponse:
+    """
+    Check availability across a date range (e.g., a week) and identify the least busy days.
+    
+    Args:
+        ctx: Run context
+        calendar_id: Calendar ID
+        start_date: Start date of the range
+        end_date: End date of the range
+        weekdays_only: If True, only consider weekdays (Monday-Friday)
+        
+    Returns:
+        CalendarResponse with availability information for the date range
+    """
+    if not ctx or not ctx.deps or not ctx.deps.calendar_service:
+        return CalendarResponse(
+            message="Calendar service not available",
+        )
+        
+    try:
+        # Use calendar_service directly
+        calendar_service = ctx.deps.calendar_service
+        
+        # Business hours
+        business_start = time(9, 0)
+        business_end = time(17, 0)
+        
+        # Calculate number of days in the range
+        days_delta = (end_date.date() - start_date.date()).days + 1
+        
+        # Store availability data for each day
+        day_availability = []
+        
+        # Check each day in the range
+        current_date = start_date
+        for _ in range(days_delta):
+            # Skip weekends if weekdays_only is True
+            if weekdays_only and current_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                current_date += timedelta(days=1)
+                continue
+                
+            # Get all appointments for the day
+            day_start = datetime.combine(current_date.date(), business_start)
+            day_end = datetime.combine(current_date.date(), business_end)
+            
+            success, appointments = calendar_service.get_appointments_in_range(
+                calendar_id=calendar_id,
+                start_time=day_start,
+                end_time=day_end,
+            )
+            
+            if not success:
+                return CalendarResponse(
+                    message=f"Failed to retrieve appointments for {current_date.date()}.",
+                    action_taken="Failed: Could not get appointments",
+                )
+            
+            # Calculate total busy time for the day
+            total_busy_minutes = 0
+            busy_slots = []
+            
+            for appt in appointments:
+                # Calculate appointment duration in minutes
+                duration_minutes = (appt.end_time - appt.start_time).total_seconds() / 60
+                total_busy_minutes += duration_minutes
+                
+                busy_slots.append({
+                    "start": appt.start_time,
+                    "end": appt.end_time,
+                    "title": appt.title,
+                    "duration_minutes": duration_minutes
+                })
+            
+            # Calculate free time in hours
+            business_day_minutes = (business_end.hour - business_start.hour) * 60
+            free_hours = (business_day_minutes - total_busy_minutes) / 60
+            
+            # Add day data to the list
+            day_availability.append({
+                "date": current_date.date(),
+                "day_of_week": current_date.strftime("%A"),
+                "free_hours": round(free_hours, 1),
+                "appointment_count": len(appointments),
+                "busy_slots": busy_slots
+            })
+            
+            # Move to next day
+            current_date += timedelta(days=1)
+        
+        # Find the least busy day
+        if day_availability:
+            least_busy_day = max(day_availability, key=lambda x: x["free_hours"])
+            
+            # Format the response message
+            day_summaries = []
+            for day_data in day_availability:
+                date_str = day_data["date"].strftime("%Y-%m-%d")
+                day_name = day_data["day_of_week"]
+                free_hours = day_data["free_hours"]
+                appt_count = day_data["appointment_count"]
+                
+                day_summaries.append(
+                    f"{day_name} ({date_str}): {free_hours} free hours, {appt_count} appointments"
+                )
+            
+            # Create a more descriptive message
+            if weekdays_only:
+                range_description = "weekdays"
+            else:
+                range_description = "days"
+                
+            message = f"Availability across the {range_description} from {start_date.date()} to {end_date.date()}:\n\n"
+            message += "\n".join(day_summaries)
+            message += f"\n\nLeast busy day: {least_busy_day['day_of_week']} ({least_busy_day['date']}) with {least_busy_day['free_hours']} free hours"
+            
+            return CalendarResponse(
+                message=message,
+                action_taken=f"Analyzed availability for {len(day_availability)} {range_description}",
+            )
+        else:
+            return CalendarResponse(
+                message="No days found in the specified range.",
+                action_taken="Failed: Invalid date range or no weekdays in range",
+            )
+            
+    except Exception as e:
+        return CalendarResponse(
+            message=f"Error checking date range availability: {str(e)}",
+        )
+
+
 async def run(
     user_prompt: str,
     calendar_service: CalendarService,

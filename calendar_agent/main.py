@@ -79,6 +79,112 @@ async def setup_test_data(calendar_service, calendar_id):
             "description": "Discuss Q2 marketing strategy",
             "location": "Office Conference Room",
         },
+        # Next week's appointments (Monday to Friday)
+        # Monday - Busy day
+        {
+            "title": "Team Planning Session",
+            "start_time": today.replace(hour=9, minute=0) + timedelta(days=3),  # Monday
+            "end_time": today.replace(hour=11, minute=0) + timedelta(days=3),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 2,
+            "type": "internal",
+            "description": "Quarterly planning session",
+            "location": "Main Conference Room",
+        },
+        {
+            "title": "Client Lunch - VIP Investor",
+            "start_time": today.replace(hour=12, minute=0) + timedelta(days=3),  # Monday
+            "end_time": today.replace(hour=13, minute=30) + timedelta(days=3),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 1,
+            "type": "client_meeting",
+            "description": "Lunch with potential investor",
+            "location": "Luxury Restaurant",
+        },
+        {
+            "title": "Property Tour - Luxury Condos",
+            "start_time": today.replace(hour=14, minute=0) + timedelta(days=3),  # Monday
+            "end_time": today.replace(hour=16, minute=0) + timedelta(days=3),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 2,
+            "type": "client_meeting",
+            "description": "Tour of new luxury condo development",
+            "location": "Downtown Development",
+        },
+        # Tuesday - Medium busy
+        {
+            "title": "Sales Team Meeting",
+            "start_time": today.replace(hour=10, minute=0) + timedelta(days=4),  # Tuesday
+            "end_time": today.replace(hour=11, minute=0) + timedelta(days=4),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 3,
+            "type": "internal",
+            "description": "Weekly sales team sync",
+            "location": "Office",
+        },
+        {
+            "title": "Property Showing - 789 Pine St",
+            "start_time": today.replace(hour=14, minute=0) + timedelta(days=4),  # Tuesday
+            "end_time": today.replace(hour=15, minute=0) + timedelta(days=4),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 2,
+            "type": "client_meeting",
+            "description": "Show property to potential buyers",
+            "location": "789 Pine St",
+        },
+        # Wednesday - Least busy
+        {
+            "title": "Quick Check-in Call",
+            "start_time": today.replace(hour=9, minute=0) + timedelta(days=5),  # Wednesday
+            "end_time": today.replace(hour=9, minute=30) + timedelta(days=5),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 4,
+            "type": "internal",
+            "description": "Brief team check-in",
+            "location": "Phone",
+        },
+        # Thursday - Medium busy
+        {
+            "title": "Marketing Review",
+            "start_time": today.replace(hour=11, minute=0) + timedelta(days=6),  # Thursday
+            "end_time": today.replace(hour=12, minute=30) + timedelta(days=6),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 3,
+            "type": "internal",
+            "description": "Review marketing materials",
+            "location": "Office",
+        },
+        {
+            "title": "Property Inspection",
+            "start_time": today.replace(hour=14, minute=0) + timedelta(days=6),  # Thursday
+            "end_time": today.replace(hour=15, minute=30) + timedelta(days=6),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 2,
+            "type": "client_meeting",
+            "description": "Final inspection before listing",
+            "location": "555 Maple Ave",
+        },
+        # Friday - Somewhat busy
+        {
+            "title": "Team Lunch",
+            "start_time": today.replace(hour=12, minute=0) + timedelta(days=7),  # Friday
+            "end_time": today.replace(hour=13, minute=30) + timedelta(days=7),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 3,
+            "type": "internal",
+            "description": "Team building lunch",
+            "location": "Local Restaurant",
+        },
+        {
+            "title": "Weekly Report Preparation",
+            "start_time": today.replace(hour=15, minute=0) + timedelta(days=7),  # Friday
+            "end_time": today.replace(hour=16, minute=30) + timedelta(days=7),
+            "status": AppointmentStatus.CONFIRMED,
+            "priority": 3,
+            "type": "internal",
+            "description": "Prepare weekly reports",
+            "location": "Office",
+        },
     ]
 
     # Add the appointments to the calendar
@@ -148,6 +254,14 @@ async def main():
         for a in test_appointments
         if a["start_time"].date() == (today + timedelta(days=1)).date()
     ]
+    
+    # Next week appointments (Monday to Friday)
+    next_week_appts = [
+        a
+        for a in test_appointments
+        if a["start_time"].date() >= (today + timedelta(days=3)).date() and 
+           a["start_time"].date() <= (today + timedelta(days=7)).date()
+    ]
 
     print(f"\nToday's Appointments ({today.strftime('%Y-%m-%d')}):")
     for i, appt in enumerate(today_appts, 1):
@@ -162,6 +276,22 @@ async def main():
         print(
             f"{i}. {appt['title']} - {appt['start_time'].strftime('%I:%M %p')} to {appt['end_time'].strftime('%I:%M %p')} (Priority: {appt['priority']})"
         )
+    
+    # Group next week appointments by day
+    next_week_by_day = {}
+    for appt in next_week_appts:
+        day = appt["start_time"].strftime('%A, %Y-%m-%d')
+        if day not in next_week_by_day:
+            next_week_by_day[day] = []
+        next_week_by_day[day].append(appt)
+    
+    print("\nNext Week's Appointments:")
+    for day, appts in next_week_by_day.items():
+        print(f"\n  {day}:")
+        for i, appt in enumerate(appts, 1):
+            print(
+                f"  {i}. {appt['title']} - {appt['start_time'].strftime('%I:%M %p')} to {appt['end_time'].strftime('%I:%M %p')} (Priority: {appt['priority']})"
+            )
 
     print("\n===== END TEST DATA =====\n")
 

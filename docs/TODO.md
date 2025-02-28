@@ -7,6 +7,7 @@ This document tracks pending tasks, improvements, and future considerations for 
 - [ ] Implement full timezone support across all agent functions
 - [ ] Add more comprehensive error handling
 - [ ] Improve logging for troubleshooting
+- [ ] Add more flexible working days and business hours configuration (support for weekend work and custom work hours)
 
 ## Context Management
 
